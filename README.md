@@ -515,9 +515,10 @@ gtm_cdp/
 ├── analyses/                eda_seed_profile.sql, what_can_we_say_about_cli.sql
 ├── docs/overview.html       the end-to-end design doc (open it in a browser)
 ├── docs/build_lineage.py    regenerates that doc's DAG from target/manifest.json
+├── docs/build_memo_pdf.py   renders MEMO.md -> MEMO.pdf, so the two can't disagree
 ├── docs/sources.production.yml   the exact diff to swap seeds for landed tables
 ├── MEMO.md
-└── MEMO.pdf                 the memo rendered (just over one page)
+└── MEMO.pdf                 the memo rendered (1.5 pages), built by docs/build_memo_pdf.py
 ```
 
 ---
