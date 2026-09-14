@@ -35,21 +35,27 @@ CHROME_CANDIDATES = [
 ]
 
 CSS = """
-@page { size: A4; margin: 13mm 14mm; }
+@page { size: A4; margin: 11mm 12mm; }
 * { box-sizing: border-box; }
-body{ font:9.6pt/1.4 -apple-system,"Helvetica Neue",Helvetica,Arial,sans-serif; color:#16181D; margin:0; }
-h1{ font-size:15pt; letter-spacing:-.02em; margin:0 0 8pt; }
-h3{ font-size:10.6pt; letter-spacing:-.01em; margin:10pt 0 4pt; padding-bottom:3pt; border-bottom:.6pt solid #D8D8D4; }
-p{ margin:0 0 5pt; }
-ul,ol{ margin:0 0 6pt; padding-left:15pt; }
-li{ margin-bottom:2pt; }
-code{ font:9pt/1.4 ui-monospace,"SF Mono",Menlo,monospace; background:#F2F2EF; padding:.5pt 2.5pt; border-radius:2pt; }
-table{ border-collapse:collapse; width:100%; margin:6pt 0 8pt; font-size:8.7pt; }
-th{ text-align:left; font-size:7.6pt; letter-spacing:.06em; text-transform:uppercase; color:#6B7280;
-    border-bottom:.8pt solid #16181D; padding:3.5pt 6pt 3.5pt 0; }
-td{ padding:4pt 6pt 4pt 0; border-bottom:.5pt solid #E4E4E0; vertical-align:top; }
+body{ font:8.6pt/1.34 -apple-system,"Helvetica Neue",Helvetica,Arial,sans-serif; color:#16181D; margin:0;
+      -webkit-font-smoothing:antialiased; }
+h1{ font-size:13pt; letter-spacing:-.02em; margin:0 0 5pt; }
+h3{ font-size:9.4pt; letter-spacing:-.01em; margin:8pt 0 3pt; padding-bottom:2pt; border-bottom:.6pt solid #C9C9C4; }
+p{ margin:0 0 4pt; }
+/* the quoted question: present, but never competing with the answer */
+blockquote{ margin:0 0 4pt; padding:0 0 0 7pt; border-left:1.5pt solid #C9C9C4;
+            font-size:7.9pt; line-height:1.3; color:#5B6270; }
+blockquote em{ font-style:normal; }
+blockquote p{ margin:0; }
+ul,ol{ margin:0 0 4pt; padding-left:13pt; }
+li{ margin-bottom:1.5pt; }
+code{ font:7.9pt/1.35 ui-monospace,"SF Mono",Menlo,monospace; background:#F2F2EF; padding:.4pt 2pt; border-radius:2pt; }
+table{ border-collapse:collapse; width:100%; margin:4pt 0 6pt; font-size:7.7pt; line-height:1.3; }
+th{ text-align:left; font-size:6.9pt; letter-spacing:.05em; text-transform:uppercase; color:#6B7280;
+    border-bottom:.8pt solid #16181D; padding:2.5pt 5pt 2.5pt 0; }
+td{ padding:3pt 5pt 3pt 0; border-bottom:.5pt solid #E4E4E0; vertical-align:top; }
 td:first-child, th:first-child{ padding-left:0; }
-strong{ font-weight:640; }
+strong{ font-weight:650; }
 """
 
 
