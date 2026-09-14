@@ -1,54 +1,73 @@
 # GTM Intelligence Platform
 
-A lightweight customer data platform built on dbt. It takes product usage, Salesforce and a third-party company feed — three systems with no key in common — and resolves them into one account-level view a sales rep can work from.
+A lightweight customer data platform built on dbt. It takes **product usage**, **Salesforce** and a **third-party company feed** — three systems with no key in common — and resolves them into one account-level view a sales rep can work from.
 
-**Full write-up:** [`docs/overview.html`](docs/overview.html) is the project report: the problem, the data provided, the exploratory analysis, model-by-model results, and the memo. Open it in a browser. Its DAG is generated from dbt's own manifest and every number in it is read back out of the built warehouse.
+Runs on a local DuckDB file. **No warehouse, no credentials, no cloud account.** The same code targets Snowflake through three dialect shims.
 
-**Run it:** `docker run --rm -v "$PWD:/app" gtm-cdp` after `docker build -t gtm-cdp .`, or `make setup && make build` in a virtualenv. Either way you should see `PASS=223 WARN=4 ERROR=0`. Details in [Running it](#running-it).
+📊 **[`docs/overview.html`](docs/overview.html) is the full project report** — problem, data provided, exploratory analysis, model-by-model results, and the memo.
 
-The brief set the constraint that shaped every design decision here: favour an unresolved mapping over a bad merge, carry a source and a confidence on every resolved mapping, and set a flag on conflicts rather than guessing. Nothing in this project merges on a similarity score, and where evidence disagrees the record goes to a review queue with the reason attached.
+> **Open it in a browser, not on GitHub.** GitHub serves `.html` files as source text, so clicking the link above from github.com shows the markup rather than the page. Clone or download the repo and open the file locally:
+> ```bash
+> git clone https://github.com/AyanPutatunda/gtm-cdp.git
+> open gtm-cdp/docs/overview.html        # macOS · Linux: xdg-open · Windows: start
+> ```
+> It is self-contained — no build step, no server, no internet needed.
+
+Everything below is how to run the project yourself.
 
 ---
 
-## Where each part of the brief is answered
+## Highlights
 
-| Brief | Where it lives |
+**An unresolved mapping beats a bad merge.** That line from the brief drove every design decision. Nothing here matches on a similarity score. Where evidence disagrees, the record goes to a review queue with the reason attached instead of a winner being picked.
+
+| | |
 |---|---|
-| **A** · users → orgs → accounts, deterministic, with an ambiguity flag | `int_user_identity` (exact-email person merge) → `int_memberships` → `int_org_account_resolution` → `int_member_account_resolution`. An account is assigned only when exactly one candidate survives; otherwise `is_ambiguous` and a `resolution_status` say why. Five of six orgs map; Frank spans two accounts and gets none. |
-| **A** · classify activity by surface, honestly, with confidence | `int_product_activity`: every event carries `surface`, `evidence_kind` (usage vs intent), `attribution` (deterministic / heuristic / none), `confidence_score` and `actor_type`. The rules are a seed, `ref_surface_signals`, not buried in SQL. |
-| **A** · per-member view, rolled up to the account | `fct_member_surface_activity` (person × surface, with "no evidence" as an explicit row) → `fct_account_surface_adoption` (account × surface, plus a plain-English `honest_summary`). |
-| **A** · what `user_id` on an object actually represents | It's the credential, not the person. Bob's 12 nightly runs are tagged `actor_type = 'automation'` and never counted as a member using the product; `assert_automation_never_counted_as_active_member` enforces it. Objects attribute through `project → org → account`, never through the creator's membership — `assert_objects_attributed_by_project_not_by_user`. |
-| **B** · normalise identifiers into comparable keys | `int_match_keys` — the one place anything is normalised, for both the CRM side and the vendor side, in the same CTEs. Plain SQL. `assert_match_keys_are_normalised` pins the expected output for all 21 entities. |
-| **B** · resolve external companies to accounts | `int_signal_company_match_candidates` (every candidate link) → `int_signal_company_resolution` (precedence decides, and only if every other key agrees). |
-| **B** · keep the unresolved | Nothing is dropped: `no_external_company_dropped_in_resolution`. Unresolved leaves through one of two doors — `net_new_prospects` when no account could exist, or the review queue when one probably does (a conflict, or no identifiers). `assert_every_external_company_has_one_output` proves each company takes exactly one. |
-| **C** · a unified view reps can act on, built to extend | `fct_account_signals` puts every source in one shape (a new source is one `union` branch); `account_360` is the rep view built on top, carrying `adoption_in_plain_english` so the caveats travel with the numbers. |
-| **D** · tests you'd actually run | 168 of them — 166 data tests plus 2 unit tests — see [Tests](#tests-youd-actually-run). The interesting ones assert *principles*, not just shapes; the unit tests pin behaviour the seeds can't reach. |
-| **D** · the memo | [MEMO.md](MEMO.md) (and `MEMO.pdf`), answering all six questions in order. |
-| **Write-up** · the whole thing as a report | [`docs/overview.html`](docs/overview.html) — problem, data provided, exploratory analysis, model-by-model results, and the memo. Its DAG is generated from dbt's manifest and every number in it is read back out of the built warehouse. |
-| **Deliverable** · runnable, `dbt build` passes | See below. 223 pass, 4 intentional warnings, 0 errors. |
-| **Deliverable** · data issues found | [Data issues found](#data-issues-found) — 15 of them. |
-| **Deliverable** · time spent, where I'd invest more | [Time spent](#time-spent-and-where-id-invest-more). |
+| **Honest about what the data can't prove** | No column in the 18 files records a client, user agent or API key id, so **CLI and MCP usage is not measurable** — only intent. That's enforced by a test (`cli_and_mcp_never_claimed_as_usage`) that fails the build, not a footnote. |
+| **Unresolved leaves through two doors** | Clean keys and no account → net-new prospect. A conflict or no identifiers at all → review queue, because an account probably already exists and prospecting it would compound the error. A test proves each company takes exactly one door. |
+| **Judgement calls are data, not SQL** | Match precedence, surface confidence and org-mapping trust each live in a reference CSV. Changing what the platform believes is a reviewable diff, not a model rewrite. |
+| **One normaliser, one definition per number** | `int_match_keys` builds the CRM keys and vendor keys in the same CTEs, so they cannot drift. Trace growth lives in one model and is read three times. |
+| **Machine vs. human kept separate** | 12 nightly CI runs under a member's key prove the *account* uses the SDK, but never make that person an active user. |
+| **Tests assert principles, not just shapes** | 166 data tests + 2 unit tests. The interesting ones are named so a failure explains itself: `conflicts_are_flagged_never_resolved`, `company_name_never_decides_a_match`, `org_level_proof_never_reported_as_member_usage`. |
+| **The report generates itself** | The lineage diagram is read from dbt's `target/manifest.json`; every figure is read back out of the built warehouse. Nothing on the page is hand-typed. |
+
+**Architecture:** `raw` (18 typed staging views) → `cleansed` (12 intermediate tables, in four passes: compare → relate → decide → classify) → `unified` (8 marts).
 
 ---
 
-## Running it
+## Data issues found
 
-### Step 0 — get into the project
+The brief asks what data issues turned up. Fifteen. Four are wired to `warn`-severity tests rather than silenced, so they resurface in **every** run — that's why a green build reports `WARN=4`.
 
-```bash
-unzip gtm_cdp.zip && cd gtm_cdp      # or: git clone <repo> && cd gtm_cdp
-ls                                    # you should see dbt_project.yml, seeds/, models/, Dockerfile
-```
-
-Everything below is run from that directory. Nothing is downloaded at run time except Python packages (path B) or the base image (path A), and there are no credentials to set up — the default target is a local DuckDB file.
-
-Then pick one of three paths. All three produce the same result.
-
-| | You need | Takes | Best for |
+| # | Where | What | How it's handled |
 |---|---|---|---|
-| **A · Docker** | Docker, nothing else | ~90s first build, ~10s after | Nothing to install, guaranteed-clean environment |
-| **B · venv** | Python **3.10 or newer** | ~60s first install, ~5s after | Iterating on models, `dbt show`, `dbt docs serve` |
-| **C · Snowflake** | credentials | — | Running the same code against a real warehouse |
+| 1 | `raw_users` | `u_grace` and `u_grace_dup` share `grace@acme.com` | Merged to one person, both ids kept · **warn test** |
+| 2 | `raw_members` | `u_frank` is in Globex (ACC002) **and** Umbrella (ACC004) | Person flagged ambiguous; his objects still attribute via their project |
+| 3 | `raw_experiments` | All of `u_bob`'s activity is CI — nightly 02:01–02:12, `author_name = ci-runner`, key `ci-service` | `actor_type = automation`; Bob becomes an `automation_identity` |
+| 4 | `raw_experiments.repo_info` | `commit_time` is `2026-07-20 00:00:00` on every row, and 5 runs predate their own "commit" | Treated as a placeholder, never used downstream · **warn test** |
+| 5 | `raw_experiments.metadata` | CI appears three ways: `ci_run_id`, `ci: "true"` as a string, `source: ci-daily`. `source` is free text | All three recognised; free-text source scored heuristic (0.60) |
+| 6 | objects | 12 of 31 carry no origin information; `raw_prompts` has no metadata column at all | `surface = unknown`, never guessed as UI |
+| 7 | `raw_segment_pages` | Two anonymous views (`anon_x9`) with no user | Excluded from attribution, counted in the scorecard so the gap stays visible |
+| 8 | `raw_account_org_map` | `org_nomap` unmapped; `org_initech` linked only by `org_c_fallback` | Prospect / confidence 0.50 — which is why Initech's usage surge is held · **warn test** |
+| 9 | `raw_salesforce_accounts` | ACC006 and ACC007 share `hooli.com`; ACC008 has neither domain nor LinkedIn; ticker stored as `NYSE:WAYN` | Shared keys can't decide a match; gaps surface in `crm_identifier_gaps`; ticker split into exchange + symbol |
+| 10 | `raw_signal_companies` | sc11 has Acme's domain with Pied Piper's LinkedIn; sc07 has no identifiers; sc05 is named "Hooli Inc" but links to Hooli XYZ; URLs arrive in 7 formats | Conflict, review, and LinkedIn-decides respectively; one normalising model, output pinned by a test |
+| 11 | `raw_news_events` | **n5 is keyed to Wayne (sc08) but reads "Stark Industries hires new CTO"** | `is_entity_mismatch`, never actionable, never shown as latest headline · **warn test** |
+| 12 | news × products | The same launch arrives in both feeds (Acme Copilot, Middle-Out API) | Merged into one corroborated signal rather than counted twice |
+| 13 | `raw_trace_volume` | 8 days only, perfectly linear at +0.7 GB/day for every org, and no `user_id` | 7-day trend at org level only; growth percentages sit on small bases and the report says so |
+| 14 | all | The data ends `2026-07-27` | Windows use `var('as_of_date')`, so every run is deterministic |
+| 15 | `raw_salesforce_accounts` | The brief names *"accounts, **owners**, the enterprise book"*, but the file has no owner, segment or tier column | Ownership and routing are out of scope; `account_360` is built so an `owner_id` is one join away |
+
+---
+
+# Replication
+
+Three ways to run it. **Pick one.** All produce the same result.
+
+| Path | You need | First run | After |
+|---|---|---|---|
+| **[A · Docker](#a--docker)** | Docker, nothing else | ~90s | ~10s |
+| **[B · Python venv](#b--python-venv)** | Python 3.10+ | ~60s | ~5s |
+| **[C · Snowflake](#c--snowflake)** | credentials | — | — |
 
 Whichever you use, the last line should read:
 
@@ -56,125 +75,301 @@ Whichever you use, the last line should read:
 Done. PASS=223 WARN=4 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=227
 ```
 
-**The four warnings are meant to be there.** They are data-quality alerts for real problems in the seeds (listed under *Data issues found*): two logins sharing an email, a placeholder `commit_time`, an org mapped only by a fallback rule, and a headline keyed to the wrong company. I made them warn rather than fail so the pipeline still completes, but the problem shows up in every run instead of being forgotten. **`ERROR=0` is the thing to check.**
+> **`WARN=4` is correct.** Those are the four data-quality alerts from the table above. **`ERROR=0` is the thing to check.**
 
 ---
 
-### A · Docker
-
-No Python, no dbt, no warehouse. Two commands, from the project directory:
+## Step 0 · Get the project
 
 ```bash
-docker build -t gtm-cdp .                    # ~90 seconds, mostly pip
-docker run --rm -v "$PWD:/app" gtm-cdp       # prints the PASS line above
+git clone https://github.com/AyanPutatunda/gtm-cdp.git
+cd gtm-cdp
 ```
 
-The image pins `python:3.12-slim` for reproducibility, not because newer is broken — see the note under path B.
-
-That is the whole thing. The bind mount is what puts `gtm_cdp.duckdb`, `target/` and `logs/` back on your machine; drop it and you get a throwaway container that just proves the build is green.
-
-With Compose, which sets the mount and `DBT_PROFILES_DIR` for you:
+Or unzip the archive and `cd` into it. Confirm you're in the right place:
 
 ```bash
-docker compose run --rm dbt                              # full build (default command)
-docker compose run --rm dbt dbt test                     # tests only
+ls
+```
+
+You should see `dbt_project.yml`, `seeds/`, `models/`, `Dockerfile`, `requirements.txt`.
+
+Every command below runs from this directory.
+
+---
+
+## A · Docker
+
+Nothing to install but Docker. The image pins `python:3.12-slim`.
+
+### A1. Build the image
+
+```bash
+docker build -t gtm-cdp .
+```
+
+Takes about 90 seconds, mostly `pip install`. Ends with `naming to docker.io/library/gtm-cdp:latest`.
+
+### A2. Run the pipeline
+
+```bash
+docker run --rm -v "$PWD:/app" gtm-cdp
+```
+
+That's the whole thing. Expect `PASS=223 WARN=4 ERROR=0`.
+
+The `-v "$PWD:/app"` bind mount is what puts `gtm_cdp.duckdb`, `target/` and `logs/` back on your machine. Drop it and you get a throwaway container that just proves the build is green:
+
+```bash
+docker run --rm gtm-cdp
+```
+
+### A3. Run other commands in the container
+
+Use Compose — it sets the mount and `DBT_PROFILES_DIR` for you:
+
+```bash
+docker compose run --rm dbt                                   # full build (default)
+docker compose run --rm dbt dbt test                          # tests only
 docker compose run --rm dbt dbt show -s account_360 --limit 10
-docker compose run --rm dbt python docs/build_lineage.py # regenerate the design doc's DAG
-docker compose run --rm dbt bash                         # poke around inside
+docker compose run --rm dbt python docs/build_lineage.py      # regenerate the report's DAG
+docker compose run --rm dbt bash                              # shell inside the image
 ```
 
-Two notes. On Linux, files written through the bind mount are owned by root — add `--user "$(id -u):$(id -g)"` if that matters to you; on macOS and Windows Docker Desktop maps ownership for you. And partial parsing is switched off in `dbt_project.yml` on purpose: dbt's parse cache stores absolute paths, so without that flag a container run and a venv run over the same directory poison each other's cache and every seed fails with a confusing `No files found that match the pattern /Users/...`. This project parses in well under a second, so the cache buys nothing.
+### A4. Notes
 
-### B · Local virtualenv
+- **Linux:** files written through the mount are owned by `root`. Add `--user "$(id -u):$(id -g)"` if that matters. macOS and Windows Docker Desktop map ownership for you.
+- **Partial parsing is off** in `dbt_project.yml`, on purpose. dbt's parse cache stores *absolute* paths, so without that flag a container run and a venv run over the same directory poison each other's cache and every seed fails with `No files found that match the pattern /Users/...`. This project parses in well under a second, so the cache buys nothing.
+
+---
+
+## B · Python venv
+
+### B1. Check your Python version
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
+python3 --version
+```
+
+**Must be 3.10 or newer** — `dbt-core` and `dbt-duckdb` both declare `requires-python >= 3.10`. Anything from 3.10 up works, including 3.14 (verified).
+
+If yours is older, point the venv at a newer one: `python3.12 -m venv .venv`, or `uv venv --python 3.12 .venv` if you have `uv`.
+
+### B2. Create the virtualenv and install
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-
-export DBT_PROFILES_DIR=.        # profiles.yml ships with the project root
-dbt build                        # seeds -> models -> tests, in dependency order
 ```
 
-**Python version.** The dependencies declare `requires-python >= 3.10`, so 3.9 and earlier will not install. Everything from 3.10 up works, including 3.14 — I verified the full green build on 3.14.2 as well as 3.12. If your `python3` is older than 3.10, point the venv at a newer one explicitly: `python3.12 -m venv .venv`, or `uv venv --python 3.12 .venv` if you have `uv`.
+That installs `dbt-core`, `dbt-duckdb`, plus `duckdb` and `markdown` for the doc generators.
 
-`requirements.txt` pulls `dbt-core`, `dbt-duckdb`, plus `duckdb` and `markdown` for the two doc generators. The default target is a **local DuckDB file** written to `gtm_cdp.duckdb` in the project root, so there is no warehouse to set up and no credentials to supply.
-
-Or use the `Makefile`, which picks a suitable interpreter, sets `DBT_PROFILES_DIR` for you, and needs no activation:
+### B3. Point dbt at the shipped profile
 
 ```bash
-make setup      # create .venv and install requirements.txt (fails loudly if no Python 3.10+)
-make build      # dbt build            -> PASS=223 WARN=4 ERROR=0
-make test       # dbt test             -> PASS=164 WARN=4 ERROR=0
-make docs       # rebuild, then regenerate docs/overview.html from the manifest + warehouse
-make memo       # render MEMO.md -> MEMO.pdf (needs Chrome installed)
+export DBT_PROFILES_DIR=.
+```
+
+`profiles.yml` ships in the project root. The default target is a local **DuckDB file** at `gtm_cdp.duckdb` — no warehouse, no credentials.
+
+### B4. Verify the connection
+
+```bash
+dbt debug
+```
+
+Expect `Connection test: OK connection ok` and `All checks passed!`.
+
+### B5. Build everything
+
+```bash
+dbt build
+```
+
+`build` interleaves seeds → models → tests in DAG order, so a broken key fails *before* anything downstream is computed. Expect:
+
+```
+Finished running 21 seeds, 12 table models, 166 data tests, 2 unit tests, 26 view models
+Done. PASS=223 WARN=4 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=227
+```
+
+### B6. Or run the stages one by one
+
+If you'd rather watch it happen in pieces:
+
+```bash
+dbt seed     # load the 21 CSVs        -> PASS=21  WARN=0 ERROR=0 TOTAL=21
+dbt run      # build the 38 models     -> PASS=38  WARN=0 ERROR=0 TOTAL=38
+dbt test     # run all 168 tests       -> PASS=164 WARN=4 ERROR=0 TOTAL=168
+```
+
+`dbt build` is preferred because the split version tests everything only at the very end, after the whole pipeline has already run on possibly-bad data.
+
+### B7. Useful selectors
+
+```bash
+dbt build -s tag:cleansed          # just the transformation layer and its tests
+dbt build -s +account_360          # the rep view and every ancestor it needs
+dbt build -s int_match_keys+       # the normaliser and everything downstream (blast radius)
+dbt test -s tag:unified            # the business-facing assertions on their own
+dbt ls --resource-type model       # list all models
+```
+
+### B8. Or use the Makefile
+
+Picks a suitable interpreter, sets `DBT_PROFILES_DIR`, and needs no activation:
+
+```bash
+make setup      # create .venv and install requirements.txt
+make build      # dbt build           -> PASS=223 WARN=4 ERROR=0
+make test       # dbt test            -> PASS=164 WARN=4 ERROR=0
+make docs       # rebuild + regenerate docs/overview.html
+make memo       # render MEMO.md -> MEMO.pdf (needs Chrome)
 make docker     # build the image and run dbt inside it
 make clean      # remove target/, logs/ and the .duckdb file (keeps .venv)
 make help       # list all targets
 ```
 
-### Looking at the results
+---
 
-These need dbt on your `PATH`, so **activate the venv first** — `make` targets run it out of `.venv/` for you, but your shell does not:
+## Querying the DuckDB database
 
-```bash
-source .venv/bin/activate && export DBT_PROFILES_DIR=.
+After a build, `gtm_cdp.duckdb` sits in the project root with three schemas:
 
-dbt show -s account_360 --limit 10
-dbt show --inline "select account_name, priority_rank, action_reasons from {{ ref('account_360') }} order by priority_rank"
-dbt docs generate && dbt docs serve      # dbt's own lineage graph + column docs
+| Schema | Contents |
+|---|---|
+| `raw` | 21 loaded seeds + 18 typed staging views |
+| `cleansed` | 12 intermediate tables — where the resolution happens |
+| `unified` | 8 marts — what people read |
+
+The eight objects worth querying:
+
+```
+unified.account_360                     one row per Salesforce account — the rep view
+unified.fct_account_signals             every signal in one shape
+unified.fct_account_surface_adoption    account × surface adoption
+unified.fct_member_surface_activity     person × surface activity
+unified.dim_members                     one row per person
+unified.dim_signal_companies            every external company + how it resolved
+unified.net_new_prospects               companies with no CRM account
+unified.rpt_resolution_quality          19 resolution metrics
 ```
 
-The project report needs no tooling at all — it is a single self-contained file:
-
-```bash
-open docs/overview.html                  # macOS;  xdg-open on Linux,  start on Windows
-```
-
-Or query `gtm_cdp.duckdb` directly. The schemas are `raw`, `cleansed` and `unified`; `duckdb` is already in `requirements.txt`:
+### Option 1 · Python (no extra install — `duckdb` is in `requirements.txt`)
 
 ```bash
 python -c "import duckdb; duckdb.connect('gtm_cdp.duckdb').sql('select account_name, priority_rank, action_reasons from unified.account_360 order by priority_rank').show(max_width=200)"
 ```
 
+For anything multi-line, use a heredoc — it avoids shell quote-escaping entirely:
+
 ```bash
-# or the DuckDB CLI, if you have it
+python <<'EOF'
+import duckdb
+con = duckdb.connect('gtm_cdp.duckdb', read_only=True)
+con.sql("""
+  select account_id, known_members, members_intent_only, pct_members_usage_proven
+  from unified.fct_account_surface_adoption
+  where surface = 'cli' and known_members > 0
+  order by account_id
+""").show(max_width=200)
+EOF
+```
+
+### Option 2 · DuckDB CLI
+
+```bash
+brew install duckdb          # macOS. Or: https://duckdb.org/docs/installation/
+duckdb gtm_cdp.duckdb
+```
+
+Then at the `D` prompt:
+
+```sql
+.tables
+select * from unified.rpt_resolution_quality order by metric_order;
+.quit
+```
+
+Or one-shot, without entering the shell:
+
+```bash
 duckdb gtm_cdp.duckdb -c "select * from unified.rpt_resolution_quality order by metric_order"
 ```
 
-### Confirming it reproduced
-
-Beyond `ERROR=0`, three numbers are worth eyeballing — they are the ones the report and the memo argue from:
-
-| Check | Command | Expected |
-|---|---|---|
-| Build | `dbt build` | `PASS=223 WARN=4 ERROR=0 ... TOTAL=227` |
-| Node counts | in the run summary | `21 seeds, 12 table models, 166 data tests, 2 unit tests, 26 view models` |
-| External resolution | `duckdb gtm_cdp.duckdb -c "select resolution_status, count(*) from cleansed.int_signal_company_resolution group by 1"` | 8 `resolved`, 1 `conflict`, 1 `unmatched`, 1 `no_identifiers` |
-
-### C · On Snowflake
-
-The same code runs on Snowflake. `macros/cross_db.sql` holds three shims for the syntax that genuinely differs (JSON extraction, list aggregation, one keyword column name) plus two helpers for the as-of date. Everything else is plain SQL.
+### Option 3 · Through dbt
 
 ```bash
-pip install "dbt-snowflake>=1.9"
-export SNOWFLAKE_ACCOUNT=... SNOWFLAKE_USER=... SNOWFLAKE_PASSWORD=...
-export SNOWFLAKE_ROLE=TRANSFORMER SNOWFLAKE_WAREHOUSE=TRANSFORMING SNOWFLAKE_DATABASE=GTM_CDP
-dbt build --target snowflake     # dev: writes DEV_RAW / DEV_CLEANSED / DEV_UNIFIED
-dbt build --target prod          # prod: writes RAW / CLEANSED / UNIFIED
+dbt show -s account_360 --limit 10
+dbt show --inline "select account_name, priority_rank, action_reasons from {{ ref('account_360') }} order by priority_rank"
 ```
 
-Dev targets get a schema prefix on purpose (see `macros/generate_schema_name.sql`), so a dev run cannot overwrite production. To use today's date instead of the frozen snapshot, pass `--vars '{as_of_date: today}'`.
+### Queries worth running first
 
-> One caveat, stated plainly: `dbt build` passes end to end on DuckDB — verified on dbt-core 1.12.4 with dbt-duckdb 1.11.0, both in a venv and in the Docker image. For Snowflake the project compiles and every compiled file passes a Snowflake-dialect syntax check, but I had no live Snowflake account to run it against.
+**The rep view — who to call and why:**
 
-### Regenerating the report
+```sql
+select account_name, priority_rank, action_reasons
+from unified.account_360 order by priority_rank;
+```
 
-`docs/overview.html` is the project write-up: problem, data, exploratory analysis, model-by-model results, and the memo. Its DAG comes from dbt's manifest and every number in it is read back out of the built warehouse, so after any change:
+**How the external feed resolved** — 8 resolved, 1 conflict, 1 unmatched, 1 with no identifiers:
+
+```sql
+select company_id, company_name, resolution_status, account_id,
+       match_method, match_confidence, next_action
+from cleansed.int_signal_company_resolution order by company_id;
+```
+
+**The honesty check** — CLI usage is `null`, never `0`, because absent evidence is not evidence of absence:
+
+```sql
+select account_id, surface, known_members, members_usage_proven,
+       members_intent_only, pct_members_usage_proven, evidence_level, honest_summary
+from unified.fct_account_surface_adoption
+where surface = 'cli' and known_members > 0;
+```
+
+**Resolution scorecard** — the 19 metrics behind the memo:
+
+```sql
+select area, metric, numerator, denominator, rate
+from unified.rpt_resolution_quality order by metric_order;
+```
+
+**Net-new prospects** — an output, not an error:
+
+```sql
+select * from unified.net_new_prospects;
+```
+
+---
+
+## Confirming it reproduced
+
+Beyond `ERROR=0`, three checks. These are the numbers the report and memo argue from:
+
+| # | Check | How | Expected |
+|---|---|---|---|
+| 1 | Build | `dbt build` | `PASS=223 WARN=4 ERROR=0 ... TOTAL=227` |
+| 2 | Node counts | in the run summary | `21 seeds, 12 table models, 166 data tests, 2 unit tests, 26 view models` |
+| 3 | External resolution | query below | 8 resolved, 1 conflict, 1 unmatched, 1 no_identifiers |
+
+```bash
+duckdb gtm_cdp.duckdb -c "select resolution_status, count(*) from cleansed.int_signal_company_resolution group by 1 order by 2 desc"
+```
+
+---
+
+## Regenerating the report
+
+`docs/overview.html` takes its lineage from dbt's manifest and its figures from the built warehouse, so after any change:
 
 ```bash
 source .venv/bin/activate && export DBT_PROFILES_DIR=.
 
-dbt build                          # must run first: the two generators read its output
+dbt build                          # must run first — the generators read its output
 python docs/build_lineage.py       # nodes, layers, passes and edges from target/manifest.json
 python docs/build_report_data.py   # every figure, from gtm_cdp.duckdb
 python docs/build_memo_pdf.py      # MEMO.md -> MEMO.pdf (needs Chrome installed)
@@ -182,424 +377,44 @@ python docs/build_memo_pdf.py      # MEMO.md -> MEMO.pdf (needs Chrome installed
 
 `make docs` runs the first three in order. Both generators fail loudly rather than silently writing a stale page: `build_lineage.py` errors if a model has no description, and refuses to run without `target/manifest.json`.
 
----
-
-## How the project runs: seeds, DAG, orchestration
-
-### Yes — everything is a dbt seed
-
-All 21 CSVs are dbt seeds, in two folders under `seeds/`:
-
-| Folder | What's in it | Loaded as |
-|---|---|---|
-| `seeds/raw/` | the **18 delivered `raw_*.csv`**, byte for byte as they arrived, next to the original `SEEDS_README.md` | tables in schema `raw` |
-| `seeds/reference/` | **3 `ref_*.csv`** I added — the platform's rules kept as data, not SQL | tables in schema `raw` |
-
-`seed-paths: ["seeds"]` in `dbt_project.yml` picks up both; the sub-folders are for humans, dbt flattens them into one namespace. Nothing preprocesses the CSVs — `dbt seed` reads them directly, which is the point: the delivered files are the source of truth and you can diff them against what was sent.
-
-Two seed configs matter:
-
-- **Column types are pinned** for the fields that would otherwise be guessed wrong. `repo_info` and `metadata` stay `varchar` so the JSON survives as text to be parsed in RAW; `ticker`, `domain`, `linkedin_*` and `segment_pages.user_id` stay `varchar` because they're sparse enough that type inference gets adventurous.
-- **`+quote_columns: false`** on purpose. Snowflake upper-cases unquoted seed columns while DuckDB keeps them as written, and `keyword_column()` is the one shim that reconciles the two — needed because one seed has a column literally named `timestamp`.
-
-The three reference seeds are what let rules change without a SQL edit: `ref_surface_signals` (what each signal proves and how confidently), `ref_org_mapping_sources` (contract 0.95 > billing_parent 0.85 > fallback 0.50) and `ref_external_match_rules` (linkedin_slug 0.90 > website_domain 0.85 > linkedin_domain 0.75, with `company_name` marked `can_resolve = false`).
-
-### One command, and what it actually does
+To browse dbt's own lineage graph and column docs instead:
 
 ```bash
-dbt build
+dbt docs generate && dbt docs serve
 ```
-
-`build` is seeds → models → tests interleaved in DAG order: each node runs only after its parents, and its tests run the moment it's built. So a broken key in RAW fails before anything downstream of it is computed, rather than after the whole pipeline has run on bad data. That's why the README tells you to run `build` and not `seed && run && test` — the latter would test everything only at the end.
-
-| Command | What it runs |
-|---|---|
-| `dbt build` | everything: 21 seeds → 18 RAW views → 12 CLEANSED tables → 8 UNIFIED views → 166 data tests + 2 unit tests |
-| `dbt build -s tag:cleansed` | just the transformation layer and its tests |
-| `dbt build -s +account_360` | `account_360` and every ancestor it needs |
-| `dbt build -s int_match_keys+` | the normaliser and everything downstream of it — the blast radius of a key change |
-| `dbt test -s tag:unified` | the business-facing assertions on their own |
-| `dbt docs generate && dbt docs serve` | the lineage graph and column-level docs |
-| `python docs/build_lineage.py` | regenerates the DAG drawn in `docs/overview.html` from `target/manifest.json` |
-
-### The DAG
-
-The version below is the readable summary. The interactive one in
-[`docs/overview.html`](docs/overview.html) is **generated from dbt's own
-`target/manifest.json`** by [`docs/build_lineage.py`](docs/build_lineage.py) — every node, every
-edge, and even the four CLEANSED passes, which are computed as dependency depth rather than
-asserted. It cannot drift from the DAG dbt actually builds, and adding a model without a one-line
-description fails the generator rather than shipping an undocumented box. Re-run it after any
-`dbt build`.
-
-```
-  seeds/raw/*.csv  (18)          seeds/reference/*.csv  (3)
-        │                                 │
-        ▼  dbt seed                       ▼
-  ┌─────────────────────────────────────────────────┐
-  │ RAW · schema raw · views, 1:1 over each seed    │
-  │   stg_product__*  (12)                          │
-  │   stg_crm__*      (2)                           │
-  │   stg_signals__*  (4)                           │
-  └─────────────────────────────────────────────────┘
-        │
-        ▼  4 passes, tables
-  ┌─────────────────────────────────────────────────┐
-  │ CLEANSED · schema cleansed                      │
-  │  1 key      int_user_identity                   │
-  │             int_org_account_resolution          │
-  │             int_org_trace_trend                 │
-  │             int_match_keys                      │
-  │  2 relate   int_memberships, int_api_keys       │
-  │             int_account_trace_trend             │
-  │             int_signal_company_match_candidates │
-  │  3 resolve  int_member_account_resolution       │
-  │             int_signal_company_resolution       │
-  │  4 classify int_product_activity                │
-  │             int_external_signals                │
-  └─────────────────────────────────────────────────┘
-        │
-        ▼  views only
-  ┌─────────────────────────────────────────────────┐
-  │ UNIFIED · schema unified                        │
-  │   dim_members · fct_member_surface_activity     │
-  │   fct_account_surface_adoption                  │
-  │   dim_signal_companies · fct_account_signals    │
-  │   account_360 · net_new_prospects               │
-  │   rpt_resolution_quality                        │
-  └─────────────────────────────────────────────────┘
-```
-
-The reference seeds feed straight into CLEANSED and UNIFIED, not through RAW — they're already clean by definition, and routing rules through a staging view would only add a layer with nothing in it.
-
-### Materialisation, and the reasoning
-
-| Layer | Materialised as | Why |
-|---|---|---|
-| Seeds | tables | dbt loads CSVs as tables; that's the landing zone |
-| RAW `stg_*` | **views** | a rename, a cast and a null-normalisation over one seed. Copying the data would buy no speed and create a second copy to drift |
-| CLEANSED `int_*` | **tables** | identity resolution is the expensive, opinionated part. Computing it once means every downstream view reads the *same* answer — if these were views, `account_360` and `rpt_resolution_quality` would each recompute the match ladder and could, after a code change, disagree |
-| UNIFIED | **views only** | the brief asks for views, and it's the right call: they're always current, cost nothing to keep fresh, and there's no orchestration question about when a mart was last refreshed |
-
-### Schemas and environments
-
-`macros/generate_schema_name.sql` names the schema after the layer, so the warehouse reads the way the project does. On DuckDB and on a target named `prod` you get `raw` / `cleansed` / `unified`. On any other target the schema is prefixed — `DEV_RAW`, `DEV_CLEANSED`, `DEV_UNIFIED` — so a dev run can't overwrite production.
-
-`as_of_date` is frozen at `2026-07-27` (the last event in the seeds), and every "last N days" window is measured from it, so results are deterministic no matter when you run the project. In production you'd pass `--vars '{as_of_date: today}'`.
-
-### Orchestration in production
-
-*Not built here — the seeds are the whole input — but this is how I'd run it, and the shape the project is already in for it.*
-
-The only layer that changes is RAW. Replace the seeds with landed tables (Fivetran for Salesforce, the product's own CDC or Snowpipe for usage, the vendor's API for external intelligence), declare them in a `sources.yml`, and repoint the 18 `stg_*` models from `ref('raw_x')` to `source('...', 'x')`. That file is written and shipped — [`docs/sources.production.yml`](docs/sources.production.yml), with freshness thresholds per feed. It lives in `docs/` rather than `models/` so `dbt build` on the seeds stays green; moving it is step one of going live. **CLEANSED and UNIFIED don't change at all** — that's the payoff of never letting business logic touch a seed directly. The 3 reference seeds stay seeds, because they're version-controlled rules, not ingested data.
-
-On Airflow (Astronomer), one DAG per cadence rather than one giant task:
-
-```
-  ingest sensors ─► dbt source freshness ─► dbt build -s tag:raw+ tag:cleansed
-                                                  │
-                                                  ▼
-                                      dbt build -s tag:unified
-                                                  │
-                                      ┌───────────┴───────────┐
-                                      ▼                       ▼
-                             reverse-ETL to SFDC      alert on rpt_resolution_quality
-```
-
-with `dbt build --select state:modified+ --defer` in CI so a pull request only rebuilds what it touched. Cadence follows the data: product usage and traces hourly, Salesforce every few hours, the external feed daily — which is also the point at which `fct_account_signals` should become an incremental model with a daily snapshot behind it, since MEMO Q6 needs the history of what a rep saw and when.
-
-Two things I'd add the day this stops being a take-home: `dbt source freshness` gating the run so stale CRM data can't silently produce a confident 360, and the `dq_warn__*` tests promoted from warn to page-someone once the underlying data issues are supposed to be fixed.
 
 ---
 
-## Step 1 — Read the data first
+## C · Snowflake
 
-Before writing a single model I profiled all 18 seeds: 163 rows across 77 columns. The profile is part of the project, so it can be re-run whenever the seeds change:
+The same code runs on Snowflake. `macros/cross_db.sql` holds three shims for the syntax that genuinely differs — JSON extraction, list aggregation, one keyword column name — plus two as-of-date helpers. Everything else is plain SQL.
 
 ```bash
-dbt compile -s eda_seed_profile     # then run target/compiled/.../eda_seed_profile.sql
+pip install "dbt-snowflake>=1.9"
+
+export SNOWFLAKE_ACCOUNT=...  SNOWFLAKE_USER=...  SNOWFLAKE_PASSWORD=...
+export SNOWFLAKE_ROLE=TRANSFORMER  SNOWFLAKE_WAREHOUSE=TRANSFORMING  SNOWFLAKE_DATABASE=GTM_CDP
+
+dbt build --target snowflake     # dev  -> DEV_RAW / DEV_CLEANSED / DEV_UNIFIED
+dbt build --target prod          # prod -> RAW / CLEANSED / UNIFIED
 ```
 
-It reads column metadata from the warehouse, so it needs a connection to compile. On the DuckDB target that's just the local file.
+Dev targets get a schema prefix on purpose (`macros/generate_schema_name.sql`), so a dev run cannot overwrite production. To use today's date instead of the frozen snapshot: `--vars '{as_of_date: today}'`.
 
-Eight questions, and what the data said:
+> **Stated plainly:** `dbt build` passes end to end on DuckDB — verified on dbt-core 1.12.4 with dbt-duckdb 1.11.0, in a venv and in the Docker image. For Snowflake the project compiles and every compiled file passes a Snowflake-dialect syntax check, but I had no live Snowflake account to run it against.
 
-| # | Question | Answer |
+---
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
 |---|---|---|
-| 1 | Is one `user_id` one person? | **No.** 9 logins, 8 people. `grace@acme.com` signed up twice. |
-| 2 | Does a person belong to one org? | **No.** Two of the nine logins sit in two orgs, and one of those spans two different accounts (Frank: Globex and Umbrella). |
-| 3 | Does every org have a CRM account? | **No.** Five of six map, and one of those five only through a fallback rule (`org_c_fallback`). |
-| 4 | Do objects belong to their creator's org? | **Yes**, all 31 of them. That makes `project → org` a safe attribution path, and a safer one than the user, who may sit in several orgs. |
-| 5 | Is there any column that names the client or surface? | **No.** No object records a client, a surface, a user-agent, or which API key created it. `source_url`, `mapping_source` and `key_hash` are the near-misses, and none of them is it. Surface has to be inferred from side-effects. |
-| 6 | How much origin evidence is there? | 17 of 22 experiments carry `repo_info`; 3 carry neither JSON field. Across all 31 objects, 12 have no origin evidence at all. |
-| 7 | Do the external identifiers join as delivered? | **No.** Not one vendor website equals a CRM domain literally. The 10 non-null websites arrive in seven different shapes: `http` and `https`, with and without `www.`, capitalised hosts, trailing slashes, paths and query strings. After normalising, 7 of 11 companies match on domain and 8 on LinkedIn. That's also when `hooli.com` turns out to belong to two accounts. |
-| 8 | What time window does the data cover? | Objects and page views 15–26 Jul, wizard and docs clicks 1–12 Jul, news 17–25 Jul, traces 20–27 Jul (4 orgs over 8 days, rising exactly 0.7 GB a day, so clearly synthetic), tech detections 1 May to 1 Jul and product detections 15 May to 25 Jul. Nothing is recent, so every window is measured from a frozen `as_of_date` instead of `current_date`. |
-
-The first four questions gave me the identity spine. Five and six set how careful the surface layer had to be. Seven is why the matching rules look the way they do, and eight is why every window runs from a fixed date. The full list of oddities is under [Data issues found](#data-issues-found).
-
----
-
-## Step 2 — Logical architecture
-
-Before the dbt layers, the shape of the problem. The three sources arrive with no shared key. Each one is normalised into comparable keys and resolved onto the account spine, and anything that fails to resolve goes to the review queue or the prospect list.
-
-```
-  SOURCES                     COMPARABLE KEYS          RESOLUTION SPINE            SERVED TO SALES
-  ─────────────────────       ───────────────────      ────────────────────        ────────────────────
-  Product usage                                        login ─► person
-   logins, orgs, projects,    email ─────────────►     (exact email)           ┐
-   objects, page views,                                                        │
-   wizard/docs clicks,        project ─► org ──────►   org ─► account          ├─► account_360
-   API keys, traces                                    (source + confidence)   │   member views
-                                                                               │   signal feed
-  Salesforce                  domain ────────────►                             │   net-new prospects
-   accounts (domain,          linkedin slug ──────►    company ─► account      ┘
-   linkedin, ticker),         name key (hint only)     (key precedence,
-   org → account map                                    conflicts flagged)     ┐
-                                                                               ├─► review queue
-  External feed                                        unresolved is kept:     │   (conflict, ambiguous,
-   companies, news,                                    conflict · ambiguous ───┘    weak link)
-   products, tech                                      no account ─────────────► net-new prospects
-```
-
-### Which join key, and why that one
-
-| Join | Key used | What the EDA said | Rejected alternative |
-|---|---|---|---|
-| **login → person** | `lower(trim(email))` | Q1: 9 logins, 8 distinct emails. The email is the credential someone signs in with, so an exact match is just a fact. | Name, or the email domain. `acme.com` on its own covers three different people. |
-| **person → org** | `raw_members (user_id, org_id)` | Q2: it really is many-to-many. Two logins sit in two orgs, and Frank's two orgs belong to two accounts. | Assuming one org per user, which would have quietly moved Frank's Umbrella work onto Globex. |
-| **object → org** | `project_id → projects.org_id` | Q4: all 31 objects sit in a project whose org their creator belongs to, so the project path is both available and consistent. | `user_id → member org`, which is ambiguous for multi-org people and would need a tie-break. |
-| **org → account** | `account_org_map.org_id` + `mapping_source` | Q3: five of six orgs map, and the *source* of each link varies (contract, billing parent, fallback). That variance is what becomes the confidence score. | Matching member email domains to the account domain. Globex has no CRM domain at all, so it would resolve nothing there. |
-| **browser event → account** | the person, and only when unambiguous | Q2 and Q5: page views, wizard views and docs clicks carry a `user_id` and nothing else. | Picking the person's "main" org, which is a coin flip for someone in two accounts. |
-| **traces → org** | `trace_volume.org_id` | Q8: the grain is org × day with no user column, so this is org-level evidence only. | Splitting GB across members by headcount. That's invented precision. |
-| **external company → account** | `linkedin_slug`, then `domain_key`, then the LinkedIn-reported domain | Q7: nothing joins as delivered. After normalising, LinkedIn slugs are unique per entity while `hooli.com` covers two accounts, so LinkedIn leads and domain supports. | Company name. It would send "Hooli Inc" to the wrong Hooli and merge Stark Industries on a name alone. |
-| **signal → company** | `company_id` | The feed's own key, and it holds for all 21 news, product and tech rows. One headline's text names a different company than its key, though. | Matching headlines to company names. That's the check, not the join. |
-
-Three rules hold the picture together:
-
-1. **One model builds every key.** `int_match_keys` normalises the Salesforce side and the vendor side in the same CTEs, so the two can't drift apart. It's plain SQL (lower, trim, strip, split) and a test pins its output for all 21 entities.
-2. **Attribution follows the strongest path available.** Objects go `project → org → account`, which is a fact about the object. Only org-less events fall back to the person, and only when that person belongs to exactly one account.
-3. **Unresolved is an output.** Conflicts and ambiguity go to a review queue with the reason attached; companies and sign-ups with no account become prospects. Both are lists a human can work through.
-
----
-
-## Step 3 — The shape: RAW → CLEANSED → UNIFIED
-
-| Medallion layer | dbt convention | Schema | Materialized | What happens here |
-|---|---|---|---|---|
-| **RAW** | seeds + `staging` | `raw` | seeds + **views** | Land the 18 CSVs as delivered, then put a 1:1 typed view on each: rename, cast, turn `''` into null, parse JSON into columns. No business logic. |
-| **CLEANSED** | `intermediate` | `cleansed` | **tables** | The transformation layer. Case matching (every identifier built by the same model), de-duplication (logins, memberships, events, cross-feed duplicates), identity resolution, surface classification, confidence scoring. UNIFIED reads only from here, apart from one reconciliation metric. |
-| **UNIFIED** | `marts` | `unified` | **views only** | What people read: members, account surface adoption, the account signal feed, `account_360`, net-new prospects, and a resolution-quality scorecard. |
-
-```
-seeds (18 raw_* + 3 ref_*)
-   │
-   ▼  RAW: 18 stg_* views (typed, JSON parsed)
-   │
-   ▼  CLEANSED
-   │    int_user_identity ─► int_memberships ─► int_member_account_resolution ─┐
-   │    int_org_account_resolution ─────────────────────────────────────────── ┼─► int_product_activity
-   │    int_api_keys ───────────────────────────────────────────────────────── ┘   (surface + confidence + actor)
-   │    int_org_trace_trend ─► int_account_trace_trend
-   │    int_match_keys  (accounts + companies, the one normaliser)
-   │         └─► int_signal_company_match_candidates ─► int_signal_company_resolution ─► int_external_signals
-   │
-   ▼  UNIFIED (views)
-        fct_member_surface_activity ─► dim_members
-        fct_account_surface_adoption ┐
-        fct_account_signals ─────────┼─► account_360
-        dim_signal_companies ────────┴─► net_new_prospects
-        rpt_resolution_quality
-```
-
-Three small reference seeds hold the platform's rules, so they can be read and changed without touching SQL:
-
-- `ref_surface_signals`: every surface signal, which surface it points at, whether it proves usage or only intent, deterministic or heuristic, a confidence, and in plain words what it can and cannot prove.
-- `ref_org_mapping_sources`: `contract 0.95 > billing_parent 0.85 > org_c_fallback 0.50`.
-- `ref_external_match_rules`: `linkedin_slug 0.90 > website_domain 0.85 > linkedin_domain 0.75`, with `company_name` set to `can_resolve = false`.
-
-### Transformation map — model by model
-
-CLEANSED builds in four passes, and each pass is only allowed one kind of work: **1** make rows unique and comparable, **2** relate them, **3** decide, **4** classify and merge. A model that both resolves *and* scores is a model nobody can debug six months later.
-
-| Model | Grain | Reads | Joined on | What it decides |
-|---|---|---|---|---|
-| **`int_user_identity`** | login | `stg_product__users` | self, on `lower(trim(email))` | Which logins are the same person. Exact email only; both ids kept, one flagged as the duplicate. |
-| **`int_org_account_resolution`** | org | `stg_product__organizations`, `stg_crm__account_org_map`, `stg_crm__salesforce_accounts`, `ref_org_mapping_sources` | `org_id`, `account_id`, `mapping_source` | Which account an org rolls up to, and how much to trust it. The rule seed turns the link type into a confidence; two accounts means none. |
-| **`int_org_trace_trend`** | org | `stg_product__trace_volume` | none — aggregate only | 7-day volume ending on the as-of date, and growth against the 7 days before. Org level, because there is no user column to split it by. |
-| **`int_match_keys`** | matchable entity | `stg_crm__salesforce_accounts`, `stg_signals__companies` | `union all`, then one set of CTEs | Nothing yet — that's the point. It only makes both sides comparable, so a key can't be built one way for Salesforce and another for the feed. |
-| **`int_account_trace_trend`** | account | `int_org_trace_trend`, `int_org_account_resolution` | `org_id` | Nothing new — it just owns the number. Trace growth used to be recomputed in three marts; it is defined once here and read three times. |
-| **`int_memberships`** | person × org | `stg_product__members`, `int_user_identity`, `int_org_account_resolution` | `user_id`, `org_id` | Collapses a person's duplicate logins into one membership row, carrying the org's account resolution with it. |
-| **`int_api_keys`** | API key | `stg_product__api_keys`, `int_user_identity` | `user_id` | Whose key it is, plus the free-text name hints (`ci-service`, `dave-cli`) that stay *hints* and never become evidence of usage. |
-| **`int_member_account_resolution`** | person | `int_user_identity`, `int_memberships` | `person_id` | One account per person, only if all their orgs agree. Frank spans Globex and Umbrella, so he gets none and is marked ambiguous. |
-| **`int_signal_company_match_candidates`** | company × method × account | `int_match_keys`, `ref_external_match_rules` | `linkedin_slug = linkedin_slug`, `website_domain = domain_key`, `linkedin_domain = domain_key`, `name_key = name_key` | Every possible link, one row per key that matched. Deliberately doesn't choose — that's the next model's job. |
-| **`int_signal_company_resolution`** | company | `int_match_keys`, `int_signal_company_match_candidates` | `company_id` | The one account, by precedence, only if the key is unique to it and every other key agrees. Otherwise conflict / ambiguous / unmatched — never a guess. |
-| **`int_product_activity`** | activity | 7 `stg_product__*` event tables, `int_user_identity`, `int_api_keys`, `int_org_account_resolution`, `int_member_account_resolution`, `ref_surface_signals` | `project_id → projects.org_id`, then `user_id`, `org_id`, `person_id`, `signal_code` | Surface, usage-or-intent, attribution, confidence and human-or-automation for every event. Objects go `project → org → account`; only org-less events fall back to the person. |
-| **`int_external_signals`** | signal | `stg_signals__news_events`, `__products`, `__tech_detections`, `__companies`, `int_signal_company_resolution` | `company_id`, plus a dedupe on company × normalised launch | Three feeds as one stream, duplicates kept once and marked corroborated, and a headline that names a different company flagged. |
-
-UNIFIED adds no new logic — no matching, no scoring, no dedupe. It shapes what CLEANSED already decided.
-
-| View | Grain | Reads | Joined on |
-|---|---|---|---|
-| `dim_members` | person | `int_member_account_resolution`, `int_api_keys`, `fct_member_surface_activity` | `person_id` |
-| `fct_member_surface_activity` | person × surface | `int_member_account_resolution`, `int_product_activity` | `person_id`, then a cross join to the four surfaces so "no evidence" is an explicit row |
-| `fct_account_surface_adoption` | account × surface | `int_product_activity`, `int_memberships`, `int_account_trace_trend`, `int_match_keys`, `ref_surface_signals` | `account_id`, `org_id` |
-| `dim_signal_companies` | external company | `int_signal_company_resolution`, `int_external_signals`, `int_match_keys` | `company_id`, `entity_id` |
-| **`fct_account_signals`** | signal | `int_external_signals`, `int_product_activity`, `int_org_account_resolution`, `int_account_trace_trend`, `int_match_keys` | `union all` into one shape, then `account_id` |
-| **`account_360`** | Salesforce account | `fct_account_signals`, `fct_account_surface_adoption`, and six `int_*` models for the counts | `account_id` throughout |
-| `net_new_prospects` | prospect | `dim_signal_companies`, `int_external_signals`, `int_memberships`, `int_member_account_resolution`, `int_org_account_resolution`, `int_product_activity` | `union all` of two anti-joins: companies with no account, people with no account |
-| `rpt_resolution_quality` | metric | seven `int_*` models plus `stg_product__segment_pages` | `union all` of counts — no row-level joins |
-
-The thing holding all of this together: **a join key is built in exactly one place and reused.** `int_match_keys` for the external side, `int_user_identity` for people. No two models can normalise the same thing differently, because no two models normalise anything.
-
----
-
-## Layer by layer
-
-### RAW — land it, type it, don't interpret it
-
-- `stg_product__*` (12), `stg_crm__*` (2), `stg_signals__*` (4): one view per seed.
-- `repo_info` and `metadata` arrive as JSON text. They're parsed once, here, into ordinary columns (`repo_is_dirty`, `repo_author_name`, `meta_ci_run_id`, `meta_source`, and so on) so no later layer has to touch JSON.
-- Tests at this layer guard the contract with upstream: primary keys, foreign keys, and whether the JSON actually parses.
-
-### CLEANSED — make things comparable, then resolve them
-
-**1. People (`int_user_identity`, `int_member_account_resolution`)**
-
-Emails are compared case-insensitively with `lower(trim(email))`. Two logins with the exact same email are one person; both user_ids are kept and point at a single `person_id`. Nothing fuzzier gets merged.
-
-Person to account runs login → org membership → org → account. If all of someone's orgs roll up to one account they resolve to it (Alice: Acme plus Acme EU, both ACC001). If their orgs belong to different accounts they're ambiguous and get no single account (Frank: Globex and Umbrella). Someone with one mapped org and one unmapped org is `partially_mapped`, which also means no single account. A person's account confidence is the weakest org link behind it.
-
-**2. Orgs (`int_org_account_resolution`)**
-
-Every org is kept. Confidence comes from how the link was made. An org pointing at two or more accounts stays unresolved. An unmapped org like `org_nomap` is a prospect, not an error.
-
-**3. Product activity by surface (`int_product_activity`)**
-
-Every experiment, dataset, prompt, page view, wizard view, docs click and CLI-named key becomes one row that answers four questions:
-
-| Question | Column | Values |
-|---|---|---|
-| Which surface? | `surface` | ui · sdk · cli · mcp · unknown |
-| Usage or just interest? | `evidence_kind` | usage · intent |
-| How sure? | `attribution`, `confidence_score` | deterministic · heuristic · none, 0–1 |
-| Who acted? | `actor_type` | human · automation · unknown |
-
-Objects are attributed to the org of their project, not to the orgs their creator belongs to, so Frank's Umbrella experiment lands on Umbrella and nowhere else. Browser events have no org at all, so they're attributed only when the person belongs to exactly one account.
-
-A word on what `user_id` means on an object: it's the login whose session or API key made the call, not necessarily the human who acted. Bob's 12 experiments run nightly between 02:01 and 02:12 with `ci_run_id = gha-10xx` and `author_name = ci-runner`, and his key is named `ci-service`. That's a GitHub Action. So `actor_type = automation`, and Bob shows up as an `automation_identity` in `dim_members`.
-
-**4. External resolution, the core of the CDP (`int_match_keys`, `…_match_candidates`, `…_resolution`)**
-
-Normalisation happens once, in `int_match_keys`, which builds the keys for both sides of the join. Plain SQL, no regex and no macros. The first and last rows below are the shapes the brief calls out; the middle three are real values from the seeds:
-
-| Raw | Key |
-|---|---|
-| `https://www.Acme.com/products?utm=x` | `acme.com` |
-| `http://globex.io/products` | `globex.io` |
-| `https://piedpiper.com/?utm_source=news` | `piedpiper.com` |
-| `https://www.linkedin.com/company/pied-piper/` | `pied-piper` |
-| `http://uk.linkedin.com/company/Acme-Corp/?trk=abc` | `acme-corp` |
-
-Every variant the brief names, and the seed row that exercises it:
-
-| Variant | Seed evidence |
-|---|---|
-| `http` vs `https` | sc02 `http://globex.io/products` vs sc03 `https://Initech.com` |
-| with / without `www.` | sc05 `https://www.hooli.com` vs sc06 `https://hooli.com` |
-| capitalised host | sc03 `https://Initech.com` |
-| trailing slash | sc01 `https://www.acme.com/`, sc09 LinkedIn `…/company/pied-piper/` |
-| path | sc02 `http://globex.io/products` |
-| query string | sc09 `https://piedpiper.com/?utm_source=news` |
-| LinkedIn with / without `www.` | sc01 `https://www.linkedin.com/…` vs sc04 `https://linkedin.com/…` |
-| LinkedIn country sub-domain | **not present in the seeds.** Handled by construction: the slug is whatever sits between `/company/` and the next `/`, `?` or `#`, so the host in front of it is never read. |
-
-Precedence and conflict rules:
-
-1. Only a key that points at exactly one account can decide a match. `hooli.com` belongs to both Hooli and Hooli XYZ, so it can't.
-2. The highest-precedence deciding key wins: LinkedIn slug, then website domain, then the LinkedIn-reported domain. LinkedIn leads because subsidiaries get their own page while they often share a domain.
-3. Every other key that matched has to agree. If any key points somewhere else, it's a conflict and no account is assigned.
-4. If two or more independent keys agree (distinct values, so `initech.com` appearing in two vendor fields counts once), confidence goes up by 0.05, capped at 0.99.
-5. Names never decide. A name is only a suggestion for a steward. But when a name points at a *different* account than the winning key, confidence drops by 0.20 and the match is held for review, so none of its signals reach a rep until someone confirms it.
-
-| External company | Outcome | Why |
-|---|---|---|
-| sc01 Acme Corporation | ✅ ACC001 · 0.95 | LinkedIn, domain and LinkedIn-domain all agree |
-| sc02 Globex | ✅ ACC002 · 0.90 | LinkedIn only; the CRM account has no domain |
-| sc03 Initech LLC | ✅ ACC003 · 0.85 | domain only (`initech.com` shows up in two vendor fields but counts once); no LinkedIn on the account |
-| sc04 Umbrella | ✅ ACC004 · 0.95 | all keys agree |
-| sc05 Hooli Inc | 🔎 ACC007 Hooli XYZ · 0.70, held for review | LinkedIn `hooli-xyz` decides, but the name points at ACC006 Hooli, so its signals wait for a steward |
-| sc06 Hooli | ✅ ACC006 Hooli · 0.90 | LinkedIn `hooli` decides |
-| sc08 Wayne Enterprises | ✅ ACC009 · 0.95 | LinkedIn and LinkedIn-domain agree; the website differs but claims no other account |
-| sc09 PiedPiper | ✅ ACC010 · 0.95 | `?utm_source` and the trailing slash normalise away |
-| sc11 Acme (dup record) | ⚠️ conflict | `acme.com` says ACC001, LinkedIn `pied-piper` says ACC010 |
-| sc07 Stark Industries | ⏸ no identifiers | the name suggests ACC008, so it goes to a steward rather than a merge |
-| sc10 Prospect AI | ➕ net-new prospect | valid keys, no account |
-
-The Hooli pair is the case that settled rule 5 for me. Everything about "Hooli Inc" reads like the parent company except the one identifier that's actually unique, so the match is made but parked.
-
-**Unresolved leaves through two doors, not one.** The brief asks that unresolved companies be kept, and none are dropped — but "kept" isn't the same as "prospected". sc10 has clean keys and simply has no account, so it's a net-new prospect. sc11 is a duplicate Acme record and sc07 has no identifiers at all: for both, an account almost certainly already exists, and putting them on a prospecting list would be a second error stacked on the first. They go to the review queue with the reason attached. `assert_every_external_company_has_one_output` checks that each of the 11 companies takes exactly one of those doors.
-
-**5. External signals (`int_external_signals`)**
-
-News, products and tech detections are unioned into one shape. Cross-feed duplicates are merged, so "Acme launches Acme Copilot" from the news feed and "Acme Copilot" from the product feed become a single corroborated signal. Headlines that don't name the company they're keyed to are flagged and never shown to a rep.
-
-### UNIFIED — what people read (all views)
-
-| View | Grain | Use it for |
-|---|---|---|
-| `dim_members` | person | who they are, which account, member type, evidence per surface. The `*_evidence` columns count **people only** — a CI job under someone's key shows up in `sdk_evidence_any_actor` and `sdk_usage_actor` instead, so Bob reads `no_evidence / usage_proven` |
-| `fct_member_surface_activity` | person × surface | per-member activity by surface; every person × surface pair gets a row, including the empty ones |
-| `fct_account_surface_adoption` | account × surface | the rollup, plus an `honest_summary` sentence that spells out what the number covers and what it leaves out. A member only counts when a person (or an unknown actor) did it; automation under their key is reported separately. `evidence_level` says at which grain the proof sits — `member`, or `org` when the only evidence is trace ingestion, which is why Initech reads `usage_proven` at 0 % of members without contradicting itself |
-| `dim_signal_companies` | external company | every company, resolved or not, with its `next_action` |
-| `fct_account_signals` | signal | the extension point: product and external signals in one shape |
-| `account_360` | Salesforce account | the rep view — the account, how it uses the product, what's happened lately, and a ranked reason to call. `action_reasons` is ordered strongest-then-freshest, not alphabetically, so the first thing a rep reads is the best reason. Two review queues are kept apart: `external_records_pending_review` (couldn't be resolved) and `external_records_awaiting_confirmation` (resolved, but the name disagrees) |
-| `net_new_prospects` | prospect | unmatched external companies plus unmapped product sign-ups |
-| `rpt_resolution_quality` | metric | the resolution scorecard, recomputed on every run |
-
-Adding a **source** (intent data, support tickets, billing events) means one more `union` branch in `fct_account_signals`. Since `account_360` takes its action reasons, headlines and review counts from that feed, and alerting or reverse-ETL would read the same place, they pick it up for free. A new **surface signal** or a new **match key** is a row in a reference CSV — and because `fct_account_surface_adoption` derives the surface list and `usage_is_measurable` from `ref_surface_signals` rather than asserting them, the day a real CLI usage signal exists, adding that row is enough to make CLI measurable.
-
-Being precise about the limit: adding a whole new **surface** (a fifth one) also means adding its pivot columns to the three views that pivot surfaces into columns — `dim_members`, `account_360` and the surface columns of the doc page. That's a known cost of presenting surfaces as columns rather than rows; the facts underneath (`fct_member_surface_activity`, `fct_account_surface_adoption`) are already long-format and need no change.
-
----
-
-## Data issues found
-
-| # | Where | What | How it's handled |
-|---|---|---|---|
-| 1 | `raw_users` | `u_grace` and `u_grace_dup` share `grace@acme.com` | merged to one person, both ids kept · warn test |
-| 2 | `raw_members` | `u_frank` is in Globex (ACC002) **and** Umbrella (ACC004) | person flagged ambiguous; his objects still attribute via their project |
-| 3 | `raw_experiments` | all of `u_bob`'s activity is CI (`ci_run_id`, `author_name = ci-runner`, nightly 02:01–02:12, key `ci-service`) | `actor_type = automation`; Bob is an `automation_identity` |
-| 4 | `raw_experiments.repo_info` | `commit_time` is `2026-07-20 00:00:00` on every row that has one, and 5 runs predate their own "commit" | treated as a placeholder and never used · warn test |
-| 5 | `raw_experiments.metadata` | CI shows up three ways: `ci_run_id`, `ci: "true"` as a string, and `source: ci-daily`; `source` is free text (`lambda-prod`, `manual`) | all three recognised; free-text source is scored heuristic (0.60) |
-| 6 | objects | 12 of 31 objects carry no origin information, and prompts have no metadata column at all | `surface = unknown`, never guessed as UI |
-| 7 | `raw_segment_pages` | two anonymous views (`anon_x9` on `/` and `/pricing`) | excluded from attribution, counted in the scorecard |
-| 8 | `raw_account_org_map` | `org_nomap` is unmapped; `org_initech` is linked only by `org_c_fallback` | prospect / low confidence 0.50 · warn test |
-| 9 | `raw_salesforce_accounts` | ACC006 and ACC007 share `hooli.com`; ACC008 has no domain or LinkedIn; ACC002 has no domain; ACC003 and ACC005 have no LinkedIn; ticker stored as `NYSE:WAYN` | shared keys can't decide a match; gaps surface in `account_360.crm_identifier_gaps`; ticker split into exchange and symbol |
-| 10 | `raw_signal_companies` | sc11 has Acme's domain with Pied Piper's LinkedIn; sc07 has no identifiers; sc05 is named "Hooli Inc" but links to Hooli XYZ; URLs arrive in every format | conflict, review, and LinkedIn-decides respectively; one normalising model with its output pinned by a test |
-| 11 | `raw_news_events` | **n5 is keyed to Wayne (sc08) but reads "Stark Industries hires new CTO"** | `is_entity_mismatch`, never actionable · warn test |
-| 12 | news × products | the same launch arrives in both feeds (Acme Copilot, Middle-Out API) | merged into one corroborated signal |
-| 13 | `raw_trace_volume` | 8 days only, perfectly linear (+0.7 GB a day for every org), and no `user_id` | 7-day trend at org level only; the growth percentages sit on small bases |
-| 14 | all | the data ends 2026-07-27 | windows use `var('as_of_date')`, so every run is deterministic |
-| 15 | `raw_salesforce_accounts` | the brief's background names *"accounts, owners, the enterprise book"*, but the file carries only `account_id`, `account_name`, `domain`, `linkedin_company_url`, `ticker` — **no owner, no segment, no tier** | ownership and routing are out of scope; `account_360` is built so an `owner_id` is one join away, and territory/tier would drop straight into the priority rank |
-
----
-
-## Tests you'd actually run
-
-166 data tests and 2 unit tests. The ones that matter most are named so a failure explains itself:
-
-- **Principles as tests.** `every_resolved_mapping_has_source_and_confidence`, `conflicts_are_flagged_never_resolved`, `company_name_never_decides_a_match`, `flagged_signals_never_reach_reps`.
-- **No silent drops.** `no_external_company_dropped_in_resolution`, `no_org_dropped_in_account_mapping`, `account_360_has_every_salesforce_account`, `assert_no_signal_lost_between_layers`, `assert_every_external_company_has_one_output`.
-- **Honesty guardrails.** `cli_and_mcp_never_claimed_as_usage`, `no_usage_percentage_for_unmeasurable_surfaces`, `assert_automation_never_counted_as_active_member`, `assert_objects_attributed_by_project_not_by_user`.
-- **Confidence gates.** A signal is only actionable if the link that put it on the account is at least 0.70 (`min_attribution_confidence`); vendor news has its own bar, `min_vendor_confidence`, which gates the third-party feed's own score and nothing else. Initech's usage surge sits on a 0.50 fallback org link, so it's held for review instead of pushed to a rep.
-- **The normaliser, pinned twice.** `assert_match_keys_are_normalised` holds the expected domain, LinkedIn slug and name key for all 21 real entities, read off the CSVs by hand. If a scheme, a `www.`, a trailing slash or a legal suffix ever survives, it fails.
-- **Unit tests, for the cases the seeds don't contain.** Fixed inputs, fixed expected output, no seed data involved — so a refactor that still happens to fit these 21 rows still fails.
-  - `match_keys_normalise_every_url_shape` feeds `int_match_keys` the exact shapes the brief names by hand, including the **LinkedIn country sub-domain that no seed row has** (`http://uk.linkedin.com/company/Acme-Corp/?trk=abc` → `acme-corp`), a port and multi-part TLD (`HTTPS://WWW.EXAMPLE.CO.UK:8443/path` → `example.co.uk`), a trailing dot, a fragment, and a name whose leading word is `the` (marked unusable rather than trusted). The CRM row and the vendor row in that test are the same company written two ways, and must come out byte-identical.
-  - `resolution_precedence_and_conflict_rules` pins one row per outcome of the match ladder: LinkedIn outranking domain, +0.05 for two independent keys, conflict → no account, shared-key ambiguity, unmatched → prospect, no identifiers → enrich, and a contradicting name costing 0.20 and holding the match.
-- **Honesty at the member grain.** `automation_identity_never_shown_as_a_human_user`, `human_evidence_never_exceeds_total_evidence`, `org_level_proof_never_reported_as_member_usage`, `assert_every_person_has_a_row_for_every_surface`.
-- **Contracts.** Unique and not-null on every grain, relationships across every foreign key, accepted values on every enum, and 0–1 ranges on every confidence.
-- **Data-quality alerts (warn).** The `dq_warn__*` tests cover issues 1, 4, 8 and 11 above.
+| `pip install` fails on dbt | Python older than 3.10 | `python3.12 -m venv .venv`, or use Docker |
+| `command not found: dbt` | venv not activated | `source .venv/bin/activate` |
+| `Could not find profile named 'gtm_cdp'` | dbt can't see `profiles.yml` | `export DBT_PROFILES_DIR=.` from the project root |
+| `No files found that match the pattern /Users/...` on every seed | Stale cross-environment parse cache | `rm -rf target/` and re-run. Shouldn't happen — `partial_parse` is off |
+| `gtm_cdp.duckdb not found` from a doc generator | Never built | Run `dbt build` first |
+| `WARN=4` | **Not a problem** | The four intentional data-quality alerts |
 
 ---
 
@@ -607,41 +422,80 @@ Being precise about the limit: adding a whole new **surface** (a fifth one) also
 
 ```
 gtm_cdp/
-├── dbt_project.yml          layers, materializations, flags, vars (as_of_date, thresholds)
-├── profiles.yml             dev = DuckDB, snowflake / prod = env vars
-├── requirements.txt         dbt-core, dbt-duckdb, duckdb, markdown
-├── Dockerfile               python:3.12-slim + requirements; `docker run` gives a green build
-├── docker-compose.yml       the same, with the bind mount and DBT_PROFILES_DIR set
-├── Makefile                 setup / build / test / docs / memo / docker / clean
-├── seeds/                   ALL 21 inputs are dbt seeds
-│   ├── raw/                   the 18 delivered CSVs, untouched (+ the original SEEDS_README.md)
-│   ├── reference/             3 ref_* CSVs: the rules as data
-│   └── _seeds.yml             seed docs + tests on the rule tables
-├── macros/                  3 dialect shims, 2 as-of-date helpers, 1 schema-naming hook
-├── models/raw/              18 stg_* views, in product/ crm/ signals/
-├── models/cleansed/         12 int_* tables + 2 unit tests
-├── models/unified/          8 views, incl. account_360
-├── tests/                   4 generic + 6 singular tests
-├── analyses/                eda_seed_profile.sql, what_can_we_say_about_cli.sql
-├── docs/overview.html       the project report — open it in a browser
-├── docs/build_lineage.py    regenerates that report's DAG from target/manifest.json
-├── docs/build_report_data.py regenerates every figure in it from gtm_cdp.duckdb
-├── docs/build_memo_pdf.py   renders MEMO.md -> MEMO.pdf, so the two can't disagree
-├── docs/sources.production.yml   the exact diff to swap seeds for landed tables
-├── MEMO.md
-└── MEMO.pdf                 the memo rendered (1.5 pages), built by docs/build_memo_pdf.py
+├── dbt_project.yml            layers, materializations, flags, vars
+├── profiles.yml               dev = DuckDB, snowflake / prod = env vars
+├── requirements.txt           dbt-core, dbt-duckdb, duckdb, markdown
+├── Dockerfile                 python:3.12-slim + requirements
+├── docker-compose.yml         the same, with bind mount + DBT_PROFILES_DIR
+├── Makefile                   setup / build / test / docs / memo / docker / clean
+├── seeds/
+│   ├── raw/                     the 18 delivered CSVs, untouched
+│   └── reference/               3 ref_* CSVs — the rules as data
+├── models/
+│   ├── raw/                     18 stg_* views (product / crm / signals)
+│   ├── cleansed/                12 int_* tables + 2 unit tests
+│   └── unified/                 8 marts, incl. account_360
+├── macros/                    3 dialect shims, 2 date helpers, 1 schema hook
+├── tests/                     4 generic + 6 singular tests
+├── analyses/                  eda_seed_profile.sql, what_can_we_say_about_cli.sql
+├── docs/
+│   ├── overview.html            the project report
+│   ├── build_lineage.py         regenerates its DAG from target/manifest.json
+│   ├── build_report_data.py     regenerates its figures from gtm_cdp.duckdb
+│   ├── build_memo_pdf.py        MEMO.md -> MEMO.pdf
+│   └── sources.production.yml   the exact diff to swap seeds for landed tables
+├── MEMO.md                    the six memo questions, answered
+└── MEMO.pdf                   the memo, rendered
 ```
 
 ---
 
-## Time spent and where I'd invest more
+## Time spent, and where I'd invest more
 
-**Time spent:** roughly 4–6 hours — about an hour reading and profiling the seeds before writing any SQL, two to three on the models and tests, and the rest on the memo and this write-up.
+**Roughly 4–6 hours** — about an hour profiling the seeds before writing any SQL, two to three on the models and tests, and the rest on the memo and write-up.
 
-If I had more time, in this order:
+### Fix the foundations first
 
-1. **Surface telemetry.** Stamp `client_surface` and `api_key_id` on every write (MEMO Q4). It would turn CLI and MCP from unmeasurable into deterministic, which is why it's first.
-2. **A labelled match set.** The unit tests pin the *rules*; they can't tell me the rules are right. 100 to 200 steward-verified external→account pairs would let precision be measured instead of assumed, plus a small review UI for the `steward_review` and `confirm_match` queues that writes confirmed matches back.
-3. **History.** Snapshot `account_360` and `fct_account_signals` daily, with dbt snapshots or incremental models. You can't learn which signals drive pipeline without knowing what a rep saw and when (MEMO Q6).
-4. **Account hierarchy.** Parent and child accounts (Hooli and Hooli XYZ, Acme and Acme EU) so signals roll up without anything being merged.
-5. **Delivery.** Reverse-ETL the actionable signals into Salesforce tasks or Slack, with a "wrong account / not useful" button that feeds straight back into the scorecard.
+1. **Surface telemetry.** Stamp `client_surface` and `api_key_id` on every write at the API gateway. It turns CLI and MCP from unmeasurable into deterministic, which is why it's first.
+2. **A labelled match set.** 100–200 steward-verified external→account pairs, so resolution precision is measured rather than asserted, plus a small review UI for the two queues that writes confirmed matches back.
+3. **History.** Snapshot `account_360` and `fct_account_signals` daily. Without it, "which signals actually drive pipeline" cannot be answered at all.
+4. **Account hierarchy.** Parent and child, so Hooli and Hooli XYZ roll up without anything being merged.
+5. **Delivery.** Reverse-ETL into Salesforce tasks or Slack, with a "wrong account" button feeding straight back into the scorecard.
+
+### Then the interface: conversational analytics
+
+Reps and GTM leaders do not write SQL, and a dashboard only answers questions someone anticipated. The natural next surface is **asking the 360 a question in plain language** — but only on top of the layers below, in this order. Doing it earlier produces a confident hallucination machine.
+
+6. **A semantic layer over the marts.** Metrics defined once, with their grain, valid filters and caveats attached: `active_members` (people, never automation), `cli_intent_rate` (denominator = product members, *not* headcount), `trace_growth_7d` (org-level only). dbt's own Semantic Layer / MetricFlow fits, since the marts are already single-grain and the honesty rules already exist as columns — `evidence_level`, `usage_is_measurable`, `honest_summary`. This is the piece that makes everything after it safe.
+
+7. **Text-to-SQL grounded in that layer**, not in the raw schema. The model picks *metrics and dimensions*, never writes free-form SQL against 39 raw tables. That constrains the output space enough to be reliable, keeps every answer traceable to a definition someone reviewed, and means a metric change propagates to the assistant automatically.
+
+8. **Expose it over MCP.** One server publishing the semantic layer as tools — `query_metric`, `describe_account`, `list_signals` — so the same grounded surface works from Claude, an internal Slack bot, or a rep's IDE without three separate integrations. Each tool returns the caveat alongside the number, because `honest_summary` travels with the row rather than being reattached by the caller.
+
+9. **The guardrail is the whole point.** Ask this platform *"what % of the account is using the CLI?"* and the honest answer is that no such number exists — that is the memo's Q3. An ungrounded text-to-SQL bot will happily invent one by counting `cli_setup_wizard` rows. So the semantic layer has to carry refusals as first-class objects: `cli_usage` is defined as **unmeasurable**, and the assistant returns *"CLI usage is not measurable from this data; here is CLI setup intent instead, at 33% of 3 known members at Globex."*
+
+10. **Evaluate the agent the way we evaluate the pipeline — with Braintrust, and continuously.** This is the part that makes 6–9 an actual product rather than a demo, and it dogfoods nicely: the seeds themselves describe experiments, datasets, prompts, evals and traces, so the agent built on this data gets judged by the same discipline the data is about.
+
+### How that eval loop works
+
+**The dbt tests are already the spec.** Every honesty rule that fails the build today is a scorer waiting to be written. `cli_and_mcp_never_claimed_as_usage` and `no_usage_percentage_for_unmeasurable_surfaces` are assertions about *the data*; the agent needs the same assertions about *its answers*.
+
+**Offline first — a golden question set as a Braintrust dataset.** Seed it from the six memo questions and every trap in the data: the CLI percentage that must be refused, Initech's `usage_proven` at 0% of members, the Hooli pair, the mis-keyed Wayne headline, Frank's two accounts, Bob's CI runs. Five scorers, most of them deterministic rather than LLM-judged:
+
+| Scorer | Type | Asks |
+|---|---|---|
+| `refusal_correctness` | binary, coded | Does it refuse the unmeasurable, and *only* the unmeasurable? Both directions matter — a bot that refuses everything scores well on honesty and is useless. |
+| `numeric_accuracy` | exact match | Does the number equal what the warehouse returns for that metric? |
+| `caveat_retention` | LLM judge | Does the answer carry the denominator and the `evidence_level`, or does it strip them? |
+| `grounded_attribution` | coded | Does it cite the metric and model it came from, so the answer is checkable? |
+| `no_invented_entities` | coded | Does it mention only accounts, companies and people that exist? |
+
+Ground truth stays current for free, because it is generated the same way this report is. `docs/build_report_data.py` already reads expected values out of the built warehouse; pointing it at the eval fixtures means **the expected answers rebuild whenever the data does**, so the golden set can never quietly go stale against the models.
+
+**Then online.** Offline evals only cover questions someone thought of. Log every production call through Braintrust and score a sample continuously with the reference-free scorers — `refusal_correctness`, `caveat_retention`, `grounded_attribution` all work without a known answer. Alert on the trend, not the incident: a slow slide in caveat retention after a prompt change is the failure mode that ships quietly.
+
+**Then self-improving, with a hard floor.** Production failures and every rep's "that's wrong" become new rows in the golden set, so the regression suite grows from real misuse rather than imagination. Prompt and semantic-layer changes ship as Braintrust experiments compared against the current baseline. The honesty scorers are gated at **100%** — a version that trades one refusal for better fluency does not ship, however good the aggregate looks. Everything else is a judgement call about score deltas; that one is not.
+
+**And it has to survive change.** New source, changed metric definition, re-run seeds: the eval suite runs in CI right after `dbt build`, because a semantic change is exactly as capable of breaking an answer as a prompt change is. Adding a fourth signal source is one `union` branch in `fct_account_signals` — and one new set of eval cases, or the agent will confidently answer questions about it having never been tested on it.
+
+The sequencing matters more than the components. A conversational surface built on the marts as they stand would be impressive in a demo and untrustworthy in a QBR — and without step 10 there is no way to know which one you have.
