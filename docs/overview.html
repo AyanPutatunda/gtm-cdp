@@ -7,387 +7,348 @@
 <meta name="description" content="Project report for a lightweight CDP built on dbt: problem, data provided, exploratory analysis, model-by-model design, results and limitations.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Fira+Sans:wght@300;400;500;600;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230D0F12'/%3E%3Crect x='7' y='8' width='3' height='16' rx='1.5' fill='%238A929C'/%3E%3Crect x='14.5' y='8' width='3' height='16' rx='1.5' fill='%23E2762A'/%3E%3Crect x='22' y='8' width='3' height='16' rx='1.5' fill='%23F0A22E'/%3E%3C/svg%3E">
 <style>
 /* ══════════════════════════════════════════════════════════════════════════
-   Tokens — cinematic dark glass, warm amber→gold progression across layers.
-   Never pure black (#000 smears on OLED); the base is a soft gradient.
+   Swiss-modern discipline on true black.
+
+   One accent. It is spent only where it carries meaning — the lineage, the
+   active section, a figure worth looking at — so glow reads as information
+   rather than decoration. Everything else is a neutral scale, an 8px rhythm
+   and type. No gradient fills, no ambient blobs, no blur for its own sake.
    ══════════════════════════════════════════════════════════════════════════ */
 :root{
   color-scheme: dark;
 
-  --deep:#06060A;  --base:#0B0B11;  --lift:#12121A;
-  --glass:rgba(255,255,255,.045);
-  --hair:rgba(255,255,255,.09);
-  --hair-2:rgba(255,255,255,.16);
+  /* neutral scale */
+  --black:#070809;  --s1:#0D0F12;  --s2:#14171B;  --s3:#1B1F24;
+  --line:#22262C;   --line-2:#2E343B;
+  --ink:#F2F3F5;    --ink-2:#A7AEB8;  --ink-3:#7D858F;
 
-  --ink:#ECEBE6;  --ink-2:#A6ABB6;  --ink-3:#868D9A;
+  /* the single accent */
+  --accent:#F0A22E;  --accent-soft:rgba(240,162,46,.12);  --accent-line:rgba(240,162,46,.34);
+  --hot:#F7C877;
 
-  /* the pipeline reads warm, and gets brighter as data becomes usable */
-  --seed:#8C93A1;   --seed-bg:rgba(140,147,161,.13);
-  --raw:#FF7A18;    --raw-bg:rgba(255,122,24,.13);
-  --clean:#FFA51F;  --clean-bg:rgba(255,165,31,.13);
-  --uni:#FFD34E;    --uni-bg:rgba(255,211,78,.13);
-  --hot:#FFE58A;
+  /* pipeline layers: neutral in, warm out. Informational, not decorative. */
+  --seed:#8A929C;   --seed-bg:rgba(138,146,156,.11);
+  --raw:#E2762A;    --raw-bg:rgba(226,118,42,.11);
+  --clean:#F0A22E;  --clean-bg:rgba(240,162,46,.11);
+  --uni:#F3C64A;    --uni-bg:rgba(243,198,74,.11);
 
-  --ok:#58E0A8;     --ok-bg:rgba(88,224,168,.13);
-  --warn:#FFC14D;   --warn-bg:rgba(255,193,77,.13);
-  --stop:#FF6B6B;   --stop-bg:rgba(255,107,107,.13);
-  --info:#7FB4FF;   --info-bg:rgba(127,180,255,.13);
+  /* semantics, deliberately desaturated */
+  --ok:#46C08A;     --ok-bg:rgba(70,192,138,.11);
+  --warn:#E8B341;   --warn-bg:rgba(232,179,65,.11);
+  --stop:#E5645B;   --stop-bg:rgba(229,100,91,.11);
+  --info:#6E9FE8;   --info-bg:rgba(110,159,232,.11);
 
-  --r:16px; --r-sm:10px;
-  --shadow:0 1px 0 rgba(255,255,255,.04) inset, 0 18px 46px -28px rgba(0,0,0,.9);
-  --glow:0 0 24px rgba(255,165,31,.18);
-  --ease:cubic-bezier(.16,1,.3,1);
+  --u:8px;                       /* base unit; every gap is a multiple */
+  --r:8px; --r-sm:6px;
+  --ease:cubic-bezier(.2,.8,.2,1);
 
-  --sans:"Fira Sans",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-  --mono:"Fira Code",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+
+  --hair:var(--line);            /* kept: referenced from script */
 }
 *,*::before,*::after{box-sizing:border-box}
-html{scroll-behavior:smooth; scroll-padding-top:84px; -webkit-text-size-adjust:100%}
+html{scroll-behavior:smooth; scroll-padding-top:88px; -webkit-text-size-adjust:100%}
 @media (prefers-reduced-motion: reduce){
   html{scroll-behavior:auto}
-  *,*::before,*::after{animation-duration:.001ms!important; animation-iteration-count:1!important; transition-duration:.001ms!important}
+  *,*::before,*::after{animation-duration:.001ms!important; transition-duration:.001ms!important}
 }
 body{
-  margin:0; min-height:100dvh; color:var(--ink);
-  font:16px/1.62 var(--sans); font-weight:400; letter-spacing:-.003em;
-  background:var(--base);
-  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+  margin:0; min-height:100dvh; background:var(--black); color:var(--ink);
+  font:15.5px/1.65 var(--sans); font-weight:400; letter-spacing:-.006em;
+  font-feature-settings:"cv05","ss01"; -webkit-font-smoothing:antialiased;
 }
-/* ambient light: two slow amber blobs behind everything */
-body::before,body::after{content:""; position:fixed; border-radius:50%; filter:blur(90px); pointer-events:none; z-index:0}
-body::before{
-  width:58vw; height:58vw; max-width:760px; max-height:760px; top:-18vw; left:-12vw;
-  background:radial-gradient(circle, rgba(255,122,24,.16), transparent 68%);
-  animation:drift1 34s var(--ease) infinite alternate;
-}
-body::after{
-  width:52vw; height:52vw; max-width:680px; max-height:680px; bottom:-16vw; right:-10vw;
-  background:radial-gradient(circle, rgba(255,211,78,.11), transparent 68%);
-  animation:drift2 42s var(--ease) infinite alternate;
-}
-@keyframes drift1{to{transform:translate3d(8vw,6vh,0) scale(1.12)}}
-@keyframes drift2{to{transform:translate3d(-7vw,-5vh,0) scale(1.08)}}
-
-a{color:var(--uni); text-underline-offset:3px; text-decoration-color:rgba(255,211,78,.4)}
-a:hover{text-decoration-color:var(--uni)}
-h1,h2,h3,h4{margin:0; font-weight:600; letter-spacing:-.022em; line-height:1.16}
-p{margin:0 0 .95em}
-:focus-visible{outline:2px solid var(--clean); outline-offset:3px; border-radius:6px}
+a{color:var(--ink); text-decoration-color:var(--line-2); text-underline-offset:3px}
+a:hover{text-decoration-color:var(--accent)}
+h1,h2,h3,h4{margin:0; font-weight:600; letter-spacing:-.024em; line-height:1.18}
+p{margin:0 0 .9em}
+:focus-visible{outline:2px solid var(--accent); outline-offset:3px; border-radius:4px}
 code{
-  font:500 13.5px/1.5 var(--mono); color:var(--hot);
-  background:rgba(255,165,31,.10); border:1px solid rgba(255,165,31,.18);
-  padding:.08em .4em; border-radius:6px; white-space:nowrap;
+  font:500 12.5px/1.5 var(--mono); color:var(--ink); background:var(--s2);
+  border:1px solid var(--line); padding:.1em .38em; border-radius:4px; white-space:nowrap;
 }
-::selection{background:rgba(255,165,31,.28)}
-::-webkit-scrollbar{width:11px;height:11px}
-::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:rgba(255,255,255,.13); border-radius:99px; border:3px solid transparent; background-clip:padding-box}
-::-webkit-scrollbar-thumb:hover{background:rgba(255,165,31,.4); background-clip:padding-box}
+::selection{background:rgba(240,162,46,.26)}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:var(--black)}
+::-webkit-scrollbar-thumb{background:var(--line-2); border-radius:99px; border:3px solid var(--black); background-clip:padding-box}
+::-webkit-scrollbar-thumb:hover{background:#3D444C; background-clip:padding-box}
 
 /* ── chrome ─────────────────────────────────────────────────────────────── */
-.top{
-  position:sticky; top:0; z-index:80;
-  background:linear-gradient(to bottom, rgba(11,11,17,.93), rgba(11,11,17,.74));
-  backdrop-filter:blur(18px) saturate(1.5); -webkit-backdrop-filter:blur(18px) saturate(1.5);
-  border-bottom:1px solid var(--hair);
-}
+.top{position:sticky; top:0; z-index:80; background:rgba(7,8,9,.86); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px); border-bottom:1px solid var(--line)}
 .top-in{max-width:1320px; margin:0 auto; padding:0 24px; height:60px; display:flex; align-items:center; gap:20px}
-.brand{display:flex; align-items:center; gap:10px; font-size:14.5px; font-weight:600; white-space:nowrap}
-.brand .mk{width:22px;height:22px;border-radius:7px;flex:0 0 auto;background:linear-gradient(140deg,var(--raw),var(--uni));box-shadow:var(--glow)}
-.top nav{display:flex; gap:1px; margin-left:auto; overflow-x:auto; scrollbar-width:none}
+.brand{display:flex; align-items:baseline; gap:10px; white-space:nowrap; font-size:14px}
+.brand .nm{font-weight:600; letter-spacing:-.02em}
+.brand .sep{width:1px; height:12px; background:var(--line-2); align-self:center}
+.brand .sub{font:500 11px/1 var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--ink-3)}
+.top nav{display:flex; gap:0; margin-left:auto; overflow-x:auto; scrollbar-width:none}
 .top nav::-webkit-scrollbar{display:none}
 .top nav a{
-  font-size:13px; color:var(--ink-3); text-decoration:none; padding:7px 11px; border-radius:9px;
-  white-space:nowrap; transition:color .18s var(--ease), background .18s var(--ease);
+  font:500 12.5px/1 var(--sans); color:var(--ink-3); text-decoration:none; padding:9px 8px;
+  border-radius:5px; white-space:nowrap; transition:color .18s var(--ease), background .18s var(--ease);
 }
-.top nav a:hover{color:var(--ink); background:var(--glass)}
-.top nav a.on{color:var(--hot); background:rgba(255,165,31,.12)}
-@media (max-width:1080px){ .top nav{display:none} }
+.top nav a:hover{color:var(--ink); background:var(--s2)}
+.top nav a.on{color:var(--accent); background:var(--accent-soft)}
+.top nav a i{font-style:normal; color:var(--ink-3); margin-right:5px; font-family:var(--mono); font-size:11px}
+.top nav a.on i{color:var(--accent)}
+@media (max-width:1320px){ .top nav a i{display:none} }
+#prog{position:absolute; left:0; bottom:-1px; height:1px; width:0; background:var(--accent); box-shadow:0 0 8px rgba(240,162,46,.6); transition:width .1s linear}
+@media (max-width:1120px){ .top nav{display:none} .brand .sub,.brand .sep{display:none} }
 
-.wrap{max-width:1320px; margin:0 auto; padding:0 24px; position:relative; z-index:1}
-section{padding:76px 0 6px; scroll-margin-top:76px}
-.shead{display:flex; align-items:baseline; gap:14px; margin-bottom:14px; flex-wrap:wrap}
-.snum{
-  font:600 12px/1 var(--mono); color:var(--clean); letter-spacing:.08em;
-  border:1px solid rgba(255,165,31,.28); background:rgba(255,165,31,.08);
-  padding:6px 9px; border-radius:8px; flex:0 0 auto;
-}
-.shead h2{font-size:clamp(23px,3.1vw,32px)}
-.lede{font-size:17px; color:var(--ink-2); max-width:78ch; margin-bottom:28px; font-weight:300}
+.wrap{max-width:1320px; margin:0 auto; padding:0 24px}
+section{padding:calc(var(--u)*10) 0 var(--u); scroll-margin-top:72px}
+.shead{display:flex; flex-wrap:wrap; align-items:center; gap:10px 16px; margin-bottom:calc(var(--u)*2)}
+.snum{font:500 12px/1 var(--mono); color:var(--ink-3); letter-spacing:.08em; flex:0 0 auto}
+.shead h2{font-size:clamp(21px,2.8vw,30px); flex:0 1 auto; min-width:0; overflow-wrap:anywhere}
+.shead::after{content:""; flex:1 1 40px; height:1px; background:var(--line)}
+.shead .tag{flex:0 0 auto; order:9}
+.lede{font-size:16.5px; line-height:1.62; color:var(--ink-2); max-width:76ch; margin-bottom:calc(var(--u)*4)}
 .lede strong{color:var(--ink); font-weight:500}
-.hr{height:1px; background:linear-gradient(to right, var(--hair), transparent); margin-top:64px}
+.hr{display:none}
 
 /* ── cover ──────────────────────────────────────────────────────────────── */
-.cover{padding:76px 0 20px}
+.cover{padding:calc(var(--u)*11) 0 calc(var(--u)*2); border-bottom:1px solid var(--line)}
 .kicker{
-  display:inline-flex; align-items:center; gap:9px; font:600 11.5px/1 var(--mono);
-  letter-spacing:.13em; text-transform:uppercase; color:var(--clean);
-  border:1px solid rgba(255,165,31,.26); background:rgba(255,165,31,.07);
-  padding:8px 13px; border-radius:99px; margin-bottom:26px;
+  display:inline-block; font:500 11px/1 var(--mono); letter-spacing:.18em; text-transform:uppercase;
+  color:var(--accent); margin-bottom:calc(var(--u)*3);
+  padding-bottom:calc(var(--u)*1.5); border-bottom:1px solid var(--accent-line);
 }
-.kicker .pulse{width:6px;height:6px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 0 rgba(88,224,168,.6);animation:pulse 2.6s infinite}
-@keyframes pulse{70%{box-shadow:0 0 0 7px rgba(88,224,168,0)}100%{box-shadow:0 0 0 0 rgba(88,224,168,0)}}
-.cover h1{
-  font-size:clamp(34px,6vw,62px); line-height:1.02; letter-spacing:-.035em; font-weight:600;
-  background:linear-gradient(120deg,#FFF6E4 12%, var(--uni) 52%, var(--raw) 96%);
-  -webkit-background-clip:text; background-clip:text; color:transparent; max-width:16ch;
-}
-.cover .deck{font-size:19px; line-height:1.55; color:var(--ink-2); max-width:64ch; margin-top:20px; font-weight:300}
-.meta{
-  display:flex; flex-wrap:wrap; margin-top:36px;
-  border:1px solid var(--hair); border-radius:var(--r); overflow:hidden;
-  background:var(--glass); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
-}
-.meta div{padding:13px 20px; border-right:1px solid var(--hair); flex:1 1 auto; min-width:150px}
+.cover h1{font-size:clamp(32px,4.8vw,52px); line-height:1.04; letter-spacing:-.034em; font-weight:600; max-width:17ch; color:var(--ink)}
+.cover .deck{font-size:18px; line-height:1.58; color:var(--ink-2); max-width:66ch; margin-top:calc(var(--u)*2.5)}
+.meta{display:grid; grid-template-columns:repeat(auto-fit,minmax(168px,1fr)); margin-top:calc(var(--u)*4.5); border-top:1px solid var(--line); border-bottom:1px solid var(--line)}
+.meta div{padding:14px 20px 14px 0; border-right:1px solid var(--line)}
 .meta div:last-child{border-right:0}
-.meta .k{display:block; font:600 10px/1 var(--mono); letter-spacing:.12em; text-transform:uppercase; color:var(--ink-3)}
-.meta .v{display:block; font-size:14.5px; margin-top:6px; font-weight:500}
+.meta .k{display:block; font:500 10px/1 var(--mono); letter-spacing:.14em; text-transform:uppercase; color:var(--ink-3)}
+.meta .v{display:block; font-size:14px; margin-top:9px; font-weight:500; color:var(--ink)}
 .meta .v.g{color:var(--ok)} .meta .v.w{color:var(--warn)}
-
-.stats{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:14px; margin-top:22px}
-.stat{
-  background:var(--glass); border:1px solid var(--hair); border-radius:var(--r-sm);
-  padding:16px 18px; backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
-  transition:border-color .2s var(--ease), transform .2s var(--ease);
+@media (max-width:720px){
+  .meta div{border-right:0; border-bottom:1px solid var(--line); padding-right:0}
+  .meta div:last-child{border-bottom:0}
 }
-.stat:hover{border-color:var(--hair-2); transform:translateY(-2px)}
-.stat b{display:block; font:600 27px/1 var(--sans); letter-spacing:-.03em; font-variant-numeric:tabular-nums}
-.stat span{display:block; font-size:11.5px; color:var(--ink-3); margin-top:7px}
-.stat.a b{color:var(--clean)} .stat.g b{color:var(--ok)} .stat.w b{color:var(--warn)}
+
+.stats{display:grid; grid-template-columns:repeat(auto-fit,minmax(132px,1fr)); gap:1px; background:var(--line); border:1px solid var(--line); border-radius:var(--r); overflow:hidden; margin-top:calc(var(--u)*3)}
+.stat{background:var(--s1); padding:16px 18px; transition:background .18s var(--ease)}
+.stat:hover{background:var(--s2)}
+.stat b{display:block; font:600 26px/1 var(--sans); letter-spacing:-.035em; font-variant-numeric:tabular-nums}
+.stat span{display:block; font-size:11.5px; color:var(--ink-3); margin-top:8px; letter-spacing:-.002em}
+.stat.a b{color:var(--accent)} .stat.g b{color:var(--ok)} .stat.w b{color:var(--warn)}
 
 /* ── surfaces ───────────────────────────────────────────────────────────── */
-.card{
-  background:var(--glass); border:1px solid var(--hair); border-radius:var(--r);
-  padding:20px 22px; backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);
-  box-shadow:var(--shadow);
-}
-.card h4{font-size:15px; margin-bottom:9px; letter-spacing:-.015em}
-.card p{font-size:14.5px; color:var(--ink-2); margin:0; font-weight:300}
-.card p + p{margin-top:9px}
-.card.accent{border-color:rgba(255,165,31,.3); background:rgba(255,165,31,.05)}
-.card.ok{border-color:rgba(88,224,168,.26)}
-.card.stop{border-color:rgba(255,107,107,.26)}
-.g2{display:grid; grid-template-columns:1fr 1fr; gap:16px}
-.g3{display:grid; grid-template-columns:repeat(3,1fr); gap:16px}
-.g4{display:grid; grid-template-columns:repeat(4,1fr); gap:14px}
+.card{background:var(--s1); border:1px solid var(--line); border-radius:var(--r); padding:20px 22px}
+.card h4{font-size:14.5px; margin-bottom:10px; letter-spacing:-.018em}
+.card > .tag{display:block; width:fit-content}
+.card p{font-size:14px; line-height:1.62; color:var(--ink-2); margin:0}
+.card p + p{margin-top:10px}
+.card.accent{border-color:var(--accent-line); background:linear-gradient(var(--accent-soft),var(--accent-soft)),var(--s1)}
+.card.ok{border-left:2px solid var(--ok)}
+.card.stop{border-left:2px solid var(--stop)}
+.g2{display:grid; grid-template-columns:1fr 1fr; gap:var(--u)}
+.g3{display:grid; grid-template-columns:repeat(3,1fr); gap:var(--u)}
+.g4{display:grid; grid-template-columns:repeat(4,1fr); gap:var(--u)}
 @media (max-width:1000px){ .g3,.g4{grid-template-columns:repeat(2,1fr)} }
 @media (max-width:720px){ .g2,.g3,.g4{grid-template-columns:1fr} }
 
 .note{
-  border-left:2px solid var(--clean); background:linear-gradient(to right, rgba(255,165,31,.07), transparent 70%);
-  padding:14px 18px; border-radius:0 var(--r-sm) var(--r-sm) 0; margin:20px 0;
-  font-size:14.5px; color:var(--ink-2); font-weight:300;
+  border-left:2px solid var(--accent); background:var(--s1);
+  padding:16px 20px; border-radius:0 var(--r-sm) var(--r-sm) 0; margin:calc(var(--u)*2.5) 0;
+  font-size:14.5px; line-height:1.62; color:var(--ink-2);
 }
-.note b{color:var(--hot); font-weight:600}
-.note.q{border-color:var(--stop); background:linear-gradient(to right, rgba(255,107,107,.07), transparent 70%)}
-.note.q b{color:var(--stop)}
+.note b{color:var(--ink); font-weight:600}
+.note.q{border-color:var(--stop)}
 
 /* ── tables ─────────────────────────────────────────────────────────────── */
-.tw{
-  overflow-x:auto; border:1px solid var(--hair); border-radius:var(--r);
-  background:rgba(255,255,255,.03); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);
-}
+.tw{overflow-x:auto; border:1px solid var(--line); border-radius:var(--r); background:var(--s1)}
 table{border-collapse:collapse; width:100%; font-size:13.5px}
 th{
-  text-align:left; font:600 10.5px/1.3 var(--mono); letter-spacing:.09em; text-transform:uppercase;
-  color:var(--ink-3); padding:13px 15px; border-bottom:1px solid var(--hair-2); white-space:nowrap;
-  background:rgba(11,11,17,.88); position:sticky; top:0; z-index:2;
-  backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+  text-align:left; font:500 10.5px/1.3 var(--mono); letter-spacing:.1em; text-transform:uppercase;
+  color:var(--ink-3); padding:12px 15px; border-bottom:1px solid var(--line-2); white-space:nowrap;
+  background:var(--s2); position:sticky; top:0; z-index:2;
 }
-td{padding:11px 15px; border-bottom:1px solid rgba(255,255,255,.055); vertical-align:top; color:var(--ink-2); font-weight:300}
+td{padding:11px 15px; border-bottom:1px solid var(--line); vertical-align:top; color:var(--ink-2); line-height:1.55}
 tbody tr:last-child td{border-bottom:0}
-tbody tr{transition:background .15s var(--ease)}
-tbody tr:hover td{background:rgba(255,165,31,.05)}
+tbody tr{transition:background .14s var(--ease)}
+tbody tr:hover td{background:var(--s2)}
 td b,td strong{color:var(--ink); font-weight:600}
 td.num,th.num{text-align:right; font-variant-numeric:tabular-nums; font-family:var(--mono); font-size:12.5px}
 .mono{font-family:var(--mono); font-size:12.5px}
 .dim{color:var(--ink-3)}
 
-.tag{
-  display:inline-block; font:600 10px/1.5 var(--mono); letter-spacing:.05em; text-transform:uppercase;
-  padding:2px 7px; border-radius:5px; white-space:nowrap; border:1px solid transparent;
-}
-.t-ok{color:var(--ok);   background:var(--ok-bg);   border-color:rgba(88,224,168,.26)}
-.t-warn{color:var(--warn);background:var(--warn-bg); border-color:rgba(255,193,77,.26)}
-.t-stop{color:var(--stop);background:var(--stop-bg); border-color:rgba(255,107,107,.26)}
-.t-info{color:var(--info);background:var(--info-bg); border-color:rgba(127,180,255,.26)}
-.t-seed{color:var(--seed);background:var(--seed-bg); border-color:rgba(140,147,161,.26)}
-.t-raw{color:var(--raw);  background:var(--raw-bg);  border-color:rgba(255,122,24,.3)}
-.t-clean{color:var(--clean);background:var(--clean-bg);border-color:rgba(255,165,31,.3)}
-.t-uni{color:var(--uni);  background:var(--uni-bg);  border-color:rgba(255,211,78,.3)}
-.t-dim{color:var(--ink-3);background:rgba(255,255,255,.05); border-color:var(--hair)}
+.tag{display:inline-block; font:500 10px/1.6 var(--mono); letter-spacing:.05em; text-transform:uppercase; padding:1px 7px; border-radius:3px; white-space:nowrap; border:1px solid transparent}
+.t-ok{color:var(--ok);   background:var(--ok-bg);   border-color:rgba(70,192,138,.24)}
+.t-warn{color:var(--warn);background:var(--warn-bg); border-color:rgba(232,179,65,.24)}
+.t-stop{color:var(--stop);background:var(--stop-bg); border-color:rgba(229,100,91,.24)}
+.t-info{color:var(--info);background:var(--info-bg); border-color:rgba(110,159,232,.24)}
+.t-seed{color:var(--seed);background:var(--seed-bg); border-color:rgba(138,146,156,.24)}
+.t-raw{color:var(--raw);  background:var(--raw-bg);  border-color:rgba(226,118,42,.26)}
+.t-clean{color:var(--clean);background:var(--clean-bg);border-color:rgba(240,162,46,.26)}
+.t-uni{color:var(--uni);  background:var(--uni-bg);  border-color:rgba(243,198,74,.26)}
+.t-dim{color:var(--ink-3);background:var(--s2); border-color:var(--line)}
 
-/* ── bar charts (the value is always printed; never colour alone) ───────── */
-.bars{display:grid; gap:7px; margin:4px 0 2px}
+/* ── bars (value always printed; never colour alone) ────────────────────── */
+.bars{display:grid; gap:6px; margin:2px 0}
 .bar{display:grid; grid-template-columns:var(--lbl,132px) 1fr auto; gap:12px; align-items:center; font-size:12.5px}
 .bar .l{font-family:var(--mono); font-size:11.5px; color:var(--ink-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
-.bar .t{height:8px; border-radius:99px; background:rgba(255,255,255,.06); overflow:hidden; position:relative}
-.bar .f{display:block; height:100%; border-radius:99px; background:linear-gradient(90deg,var(--raw),var(--uni)); box-shadow:0 0 12px rgba(255,165,31,.35)}
-.bar .f.b2{background:linear-gradient(90deg,rgba(140,147,161,.7),var(--seed)); box-shadow:none}
+.bar .t{height:6px; border-radius:2px; background:var(--s3); overflow:hidden}
+.bar .f{display:block; height:100%; border-radius:2px; background:var(--accent)}
+.bar .f.b2{background:var(--seed)}
 .bar .v{font-family:var(--mono); font-size:11.5px; color:var(--ink); min-width:62px; text-align:right; font-variant-numeric:tabular-nums}
-.stackbar{display:flex; height:26px; border-radius:8px; overflow:hidden; border:1px solid var(--hair); margin:6px 0 10px}
-.stackbar span{display:grid; place-items:center; font:600 10.5px var(--mono); white-space:nowrap; overflow:hidden}
+.stackbar{display:flex; height:24px; border-radius:var(--r-sm); overflow:hidden; border:1px solid var(--line); margin:4px 0 10px}
+.stackbar span{display:grid; place-items:center; font:500 10.5px var(--mono); white-space:nowrap; overflow:hidden}
 
-/* ── lineage ────────────────────────────────────────────────────────────── */
-.lin-ctl{display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:14px}
-.chip{
-  font:500 12.5px var(--sans); border:1px solid var(--hair); background:var(--glass); color:var(--ink-2);
-  padding:7px 14px; border-radius:99px; cursor:pointer; transition:all .18s var(--ease); min-height:36px;
-}
-.chip:hover{border-color:var(--hair-2); color:var(--ink)}
-.chip.on{background:linear-gradient(120deg,var(--raw),var(--clean)); color:#150F04; border-color:transparent; font-weight:600; box-shadow:var(--glow)}
-.ctl-lbl{font:600 10.5px var(--mono); letter-spacing:.12em; text-transform:uppercase; color:var(--ink-3)}
-.legend{display:flex; flex-wrap:wrap; gap:18px; align-items:center; margin-bottom:12px; font-size:13px; color:var(--ink-2)}
+/* ── lineage: the one place light is spent ──────────────────────────────── */
+.lin-ctl{display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-bottom:calc(var(--u)*1.5)}
+.chip{font:500 12.5px var(--sans); border:1px solid var(--line-2); background:transparent; color:var(--ink-2); padding:7px 13px; border-radius:99px; cursor:pointer; transition:all .18s var(--ease); min-height:34px}
+.chip:hover{border-color:var(--ink-3); color:var(--ink)}
+.chip.on{background:var(--accent); color:#0A0803; border-color:var(--accent); font-weight:600}
+.ctl-lbl{font:500 10.5px var(--mono); letter-spacing:.14em; text-transform:uppercase; color:var(--ink-3); margin-right:4px}
+.legend{display:flex; flex-wrap:wrap; gap:20px; align-items:center; margin-bottom:calc(var(--u)*1.5); font-size:13px; color:var(--ink-2)}
 .legend .li{display:flex; align-items:center; gap:8px}
-.sw{width:28px;height:15px;border-radius:5px;border:1px solid var(--hair); flex:0 0 auto}
-.sw.d{background:rgba(140,147,161,.15)}
-.sw.n{background:var(--glass); box-shadow:inset 4px 0 0 var(--clean)}
-.prov{font-size:12.5px; color:var(--ink-3); margin:-4px 0 16px; max-width:96ch; font-weight:300}
+.sw{width:26px;height:14px;border-radius:3px;border:1px solid var(--line-2); flex:0 0 auto}
+.sw.d{background:var(--s2)}
+.sw.n{background:var(--s1); box-shadow:inset 3px 0 0 var(--accent)}
+.prov{font-size:12.5px; line-height:1.6; color:var(--ink-3); margin:0 0 calc(var(--u)*2); max-width:96ch}
 .prov b{color:var(--ink-2); font-weight:600}
 
-.lin{border:1px solid var(--hair); border-radius:var(--r); background:rgba(255,255,255,.03); overflow:hidden; backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px)}
+.lin{border:1px solid var(--line); border-radius:var(--r); background:var(--s1); overflow:hidden}
 .lin-sc{overflow-x:auto; padding:20px}
-.flow{display:grid; grid-template-columns:repeat(4,minmax(216px,1fr)); gap:26px; min-width:980px; margin-bottom:16px}
-.fs{position:relative; border-radius:var(--r-sm); padding:11px 15px; border:1px solid var(--hair); background:rgba(255,255,255,.035)}
-.fs .t{font:600 11px/1.2 var(--mono); letter-spacing:.11em; text-transform:uppercase}
-.fs .d{font-size:11.5px; color:var(--ink-3); margin-top:4px; line-height:1.45; font-weight:300}
-.fs:not(:last-child)::after{
-  content:""; position:absolute; right:-20px; top:50%; width:11px; height:11px;
-  transform:translateY(-50%) rotate(45deg);
-  border-top:2px solid rgba(255,165,31,.45); border-right:2px solid rgba(255,165,31,.45);
-}
+.flow{display:grid; grid-template-columns:repeat(4,minmax(216px,1fr)); gap:24px; min-width:980px; margin-bottom:calc(var(--u)*2)}
+.fs{position:relative; border-radius:var(--r-sm); padding:11px 14px; border:1px solid var(--line); background:var(--s2)}
+.fs .t{font:500 10.5px/1.2 var(--mono); letter-spacing:.14em; text-transform:uppercase}
+.fs .d{font-size:11.5px; color:var(--ink-3); margin-top:5px; line-height:1.45}
+.fs:not(:last-child)::after{content:""; position:absolute; right:-19px; top:50%; width:9px; height:9px; transform:translateY(-50%) rotate(45deg); border-top:1.5px solid var(--line-2); border-right:1.5px solid var(--line-2)}
 .f1 .t{color:var(--seed)} .f2 .t{color:var(--raw)} .f3 .t{color:var(--clean)} .f4 .t{color:var(--uni)}
 
-.grid{display:grid; grid-template-columns:repeat(4,minmax(216px,1fr)); gap:26px; position:relative; min-width:980px}
+.grid{display:grid; grid-template-columns:repeat(4,minmax(216px,1fr)); gap:24px; position:relative; min-width:980px}
 #edges{position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:1; overflow:visible}
 .col{position:relative; z-index:2}
-.col-h{display:flex; align-items:baseline; gap:9px; margin-bottom:5px}
-.col-h .n{font:600 11.5px/1 var(--mono); letter-spacing:.11em; text-transform:uppercase}
+.col-h{display:flex; align-items:baseline; gap:9px; margin-bottom:6px}
+.col-h .n{font:600 11px/1 var(--mono); letter-spacing:.14em; text-transform:uppercase}
 .col-h .m{font-size:11px; color:var(--ink-3)}
 .col-h .c{font:11px var(--mono); color:var(--ink-3); margin-left:auto}
 .col.source .col-h .n{color:var(--seed)} .col.raw .col-h .n{color:var(--raw)}
 .col.cleansed .col-h .n{color:var(--clean)} .col.unified .col-h .n{color:var(--uni)}
-.col-bar{height:2px; border-radius:2px; margin-bottom:13px}
-.col.source .col-bar{background:linear-gradient(90deg,var(--seed),transparent)}
-.col.raw .col-bar{background:linear-gradient(90deg,var(--raw),transparent)}
-.col.cleansed .col-bar{background:linear-gradient(90deg,var(--clean),transparent)}
-.col.unified .col-bar{background:linear-gradient(90deg,var(--uni),transparent)}
-.grp{font:600 10px/1 var(--mono); letter-spacing:.11em; text-transform:uppercase; color:var(--ink-3); margin:14px 0 7px}
+.col-bar{height:1px; margin-bottom:14px}
+.col.source .col-bar{background:var(--seed)} .col.raw .col-bar{background:var(--raw)}
+.col.cleansed .col-bar{background:var(--clean)} .col.unified .col-bar{background:var(--uni)}
+.grp{font:500 10px/1 var(--mono); letter-spacing:.14em; text-transform:uppercase; color:var(--ink-3); margin:16px 0 7px}
 .grp:first-of-type{margin-top:0}
 .node{
-  display:block; width:100%; text-align:left; cursor:pointer; margin-bottom:6px; position:relative;
-  background:rgba(255,255,255,.04); border:1px solid var(--hair); border-radius:9px;
-  padding:8px 11px; font:500 12px/1.35 var(--mono); color:var(--ink); letter-spacing:-.01em; min-height:44px;
-  transition:opacity .2s var(--ease), border-color .2s var(--ease), background .2s var(--ease), transform .2s var(--ease);
+  display:block; width:100%; text-align:left; cursor:pointer; margin-bottom:5px; position:relative;
+  background:var(--s2); border:1px solid var(--line); border-radius:var(--r-sm);
+  padding:8px 11px; font:500 12px/1.35 var(--mono); color:var(--ink); letter-spacing:-.012em; min-height:44px;
+  transition:opacity .2s var(--ease), border-color .2s var(--ease), background .2s var(--ease);
 }
-.node:hover{border-color:rgba(255,165,31,.45); background:rgba(255,165,31,.07); transform:translateX(2px)}
+.node:hover{border-color:var(--accent-line); background:var(--s3)}
 .node .nm{display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
-.node .gr{display:block; font:300 10.5px/1.35 var(--sans); color:var(--ink-3); margin-top:2px}
-.node.is-new::after{content:""; position:absolute; left:0; top:0; bottom:0; width:4px; border-radius:8px 0 0 8px; background:linear-gradient(180deg,var(--raw),var(--uni))}
-.node.delivered{background:rgba(140,147,161,.09); border-color:rgba(140,147,161,.2)}
-.lin.sel .node{opacity:.2}
+.node .gr{display:block; font:400 10.5px/1.35 var(--sans); color:var(--ink-3); margin-top:2px}
+.node.is-new::after{content:""; position:absolute; left:0; top:0; bottom:0; width:3px; border-radius:5px 0 0 5px; background:var(--accent)}
+.node.delivered{background:transparent; border-style:dashed; border-color:var(--line-2)}
+.node.delivered .nm{color:var(--ink-2)}
+.lin.sel .node{opacity:.18}
 .lin.sel .node.act{opacity:1}
-.node.pick{border-color:var(--clean); background:rgba(255,165,31,.14); box-shadow:var(--glow)}
+.node.pick{border-color:var(--accent); background:var(--accent-soft); box-shadow:0 0 0 1px var(--accent-line), 0 0 18px rgba(240,162,46,.16)}
 .lin.hide-d .col.source .node.delivered,
 .lin.hide-d .col.source .grp.d-only{display:none}
-.lin-panel{border-top:1px solid var(--hair); background:rgba(255,255,255,.025); padding:18px 22px; min-height:110px}
-.lp-empty{color:var(--ink-3); font-size:13.5px; font-weight:300}
-.lp-h{display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:8px}
-.lp-h h4{font:600 15.5px var(--mono); letter-spacing:-.01em; color:var(--hot)}
-.lp-d{font-size:14px; color:var(--ink-2); max-width:96ch; margin-bottom:11px; font-weight:300}
+.lin-panel{border-top:1px solid var(--line); background:var(--s2); padding:18px 22px; min-height:108px}
+.lp-empty{color:var(--ink-3); font-size:13.5px}
+.lp-h{display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:9px}
+.lp-h h4{font:600 15px var(--mono); letter-spacing:-.02em; color:var(--accent)}
+.lp-d{font-size:14px; line-height:1.6; color:var(--ink-2); max-width:96ch; margin-bottom:12px}
 .lp-m{display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:10px 26px}
-.lp-m .k{font:600 10px var(--mono); letter-spacing:.11em; text-transform:uppercase; color:var(--ink-3); display:block; margin-bottom:4px}
-.lp-m .v{font-size:12.5px; color:var(--ink-2); line-height:1.7}
+.lp-m .k{display:block; font:500 10px var(--mono); letter-spacing:.14em; text-transform:uppercase; color:var(--ink-3); margin-bottom:5px}
+.lp-m .v{font-size:12.5px; color:var(--ink-2); line-height:1.75}
 .lp-m .v code{font-size:11.5px; white-space:normal}
 @media (max-width:1000px){ #edges{display:none} .grid,.flow{min-width:0; grid-template-columns:1fr} .fs::after{display:none} }
 
-/* ── master/detail explorer ─────────────────────────────────────────────── */
-.split{display:grid; grid-template-columns:264px 1fr; border:1px solid var(--hair); border-radius:var(--r); background:rgba(255,255,255,.03); overflow:hidden; backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px)}
-.split .list{border-right:1px solid var(--hair); background:rgba(0,0,0,.2); max-height:540px; overflow-y:auto}
-.split .list button{
-  display:block; width:100%; text-align:left; border:0; border-bottom:1px solid rgba(255,255,255,.05);
-  background:transparent; padding:12px 16px; cursor:pointer; font:500 12.5px var(--mono); color:var(--ink-2);
-  transition:background .16s var(--ease), color .16s var(--ease); min-height:44px;
-}
-.split .list button:hover{background:rgba(255,165,31,.07); color:var(--ink)}
-.split .list button.on{background:rgba(255,165,31,.12); color:var(--hot); box-shadow:inset 3px 0 0 var(--clean)}
-.split .list button .st{display:block; font:300 10.5px var(--sans); margin-top:4px}
+/* ── master/detail ──────────────────────────────────────────────────────── */
+.split{display:grid; grid-template-columns:262px 1fr; border:1px solid var(--line); border-radius:var(--r); background:var(--s1); overflow:hidden}
+.split .list{border-right:1px solid var(--line); background:var(--black); max-height:536px; overflow-y:auto}
+.split .list button{display:block; width:100%; text-align:left; border:0; border-bottom:1px solid var(--line); background:transparent; padding:12px 16px; cursor:pointer; font:500 12.5px var(--mono); color:var(--ink-2); transition:background .16s var(--ease), color .16s var(--ease); min-height:44px}
+.split .list button:hover{background:var(--s2); color:var(--ink)}
+.split .list button.on{background:var(--s1); color:var(--accent); box-shadow:inset 2px 0 0 var(--accent)}
+.split .list button .st{display:block; font:400 10.5px var(--sans); margin-top:5px}
 .split .body{padding:22px 24px; min-height:340px}
-/* grid/flex children must be allowed to shrink below their content, or a wide
-   table inside one stretches the whole page and creates horizontal scroll */
 .split > *, .card, .g2 > *, .g3 > *, .g4 > *, .lp-m > *{min-width:0}
 .tw{max-width:100%}
-.tnames{font:12.5px/2.05 var(--mono); color:var(--ink-2); overflow-wrap:anywhere}
+.tnames{font:500 12.5px/2 var(--mono); color:var(--ink-2); overflow-wrap:anywhere}
 .lp-m .v{overflow-wrap:anywhere}
 .split .list button{overflow-wrap:anywhere}
-@media (max-width:820px){ .split{grid-template-columns:1fr} .split .list{max-height:210px; border-right:0; border-bottom:1px solid var(--hair)} }
+@media (max-width:820px){ .split{grid-template-columns:1fr} .split .list{max-height:208px; border-right:0; border-bottom:1px solid var(--line)} }
 
-.kv{display:grid; grid-template-columns:158px 1fr; gap:9px 18px; font-size:13.5px; margin:16px 0}
-.kv dt{font:600 10px var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--ink-3); padding-top:3px}
-.kv dd{margin:0; color:var(--ink-2); font-weight:300}
+.kv{display:grid; grid-template-columns:156px 1fr; gap:9px 18px; font-size:13.5px; margin:16px 0}
+.kv dt{font:500 10px var(--mono); letter-spacing:.12em; text-transform:uppercase; color:var(--ink-3); padding-top:3px}
+.kv dd{margin:0; color:var(--ink-2); line-height:1.6}
 @media (max-width:560px){ .kv{grid-template-columns:1fr; gap:2px} .kv dd{margin-bottom:10px} }
-.krow{display:flex; gap:10px; align-items:baseline; padding:9px 0; border-bottom:1px dashed rgba(255,255,255,.08); font-size:13px; flex-wrap:wrap}
+.krow{display:flex; gap:10px; align-items:baseline; padding:9px 0; border-bottom:1px solid var(--line); font-size:13px; flex-wrap:wrap}
 .krow:last-child{border-bottom:0}
-.krow .m{font:600 11px var(--mono); color:var(--ink-3); width:126px; flex:0 0 auto}
-.krow .v{font:500 12.5px var(--mono); color:var(--hot)}
+.krow .m{font:500 11px var(--mono); color:var(--ink-3); width:126px; flex:0 0 auto}
+.krow .v{font:500 12.5px var(--mono); color:var(--ink)}
 .krow .o{margin-left:auto; text-align:right}
-.res{display:flex; flex-wrap:wrap; gap:26px; margin:18px 0 14px; padding:14px 0; border-top:1px solid var(--hair); border-bottom:1px solid var(--hair)}
-.res .k{font:600 10px var(--mono); letter-spacing:.1em; text-transform:uppercase; color:var(--ink-3); display:block; margin-bottom:4px}
-.res b{font-size:15px; color:var(--ink)}
+.res{display:flex; flex-wrap:wrap; gap:28px; margin:18px 0 14px; padding:14px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line)}
+.res .k{display:block; font:500 10px var(--mono); letter-spacing:.12em; text-transform:uppercase; color:var(--ink-3); margin-bottom:5px}
+.res b{font-size:15px; color:var(--ink); font-variant-numeric:tabular-nums}
 
 /* ── code ───────────────────────────────────────────────────────────────── */
-.cw{position:relative; margin:16px 0}
-pre{
-  margin:0; background:rgba(0,0,0,.42); color:#E8E6E0; border:1px solid var(--hair);
-  border-radius:var(--r); padding:18px 20px; overflow-x:auto; font:13px/1.7 var(--mono);
-}
-pre .c{color:var(--ink-3)} pre .g{color:var(--ok)} pre .y{color:var(--uni)} pre .o{color:var(--raw)}
-.copy{
-  position:absolute; top:10px; right:10px; z-index:2; border:1px solid var(--hair);
-  background:rgba(255,255,255,.07); color:var(--ink-2); font:500 11px var(--mono);
-  padding:6px 11px; border-radius:7px; cursor:pointer; min-height:32px; transition:all .16s var(--ease);
-}
-.copy:hover{background:rgba(255,165,31,.16); color:var(--hot); border-color:rgba(255,165,31,.4)}
+.cw{position:relative; margin:calc(var(--u)*2) 0}
+pre{margin:0; background:var(--s1); color:var(--ink); border:1px solid var(--line); border-radius:var(--r); padding:18px 20px; overflow-x:auto; font:12.5px/1.75 var(--mono)}
+pre .c{color:var(--ink-3)} pre .g{color:var(--ok)} pre .y{color:var(--accent)} pre .o{color:var(--raw)}
+.copy{position:absolute; top:10px; right:10px; z-index:2; border:1px solid var(--line-2); background:var(--s2); color:var(--ink-2); font:500 11px var(--mono); padding:6px 11px; border-radius:5px; cursor:pointer; min-height:32px; transition:all .16s var(--ease)}
+.copy:hover{background:var(--s3); color:var(--accent); border-color:var(--accent-line)}
 
 /* ── accordion ──────────────────────────────────────────────────────────── */
-details.acc{border:1px solid var(--hair); border-radius:var(--r); background:var(--glass); margin-bottom:10px; overflow:hidden; backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px)}
-details.acc > summary{cursor:pointer; padding:15px 20px; font-weight:500; font-size:15px; list-style:none; display:flex; align-items:center; gap:13px; min-height:44px}
+details.acc{border:1px solid var(--line); border-radius:var(--r); background:var(--s1); margin-bottom:6px; overflow:hidden}
+details.acc > summary{cursor:pointer; padding:15px 20px; font-weight:500; font-size:14.5px; list-style:none; display:flex; align-items:center; gap:14px; min-height:44px}
 details.acc > summary::-webkit-details-marker{display:none}
-details.acc > summary::after{content:"+"; margin-left:auto; color:var(--clean); font:400 19px var(--mono); line-height:1}
-details.acc[open] > summary::after{content:"−"}
-details.acc > summary:hover{background:rgba(255,165,31,.06)}
-details.acc[open] > summary{color:var(--hot)}
-details.acc .in{padding:4px 20px 20px; border-top:1px solid var(--hair); color:var(--ink-2); font-size:14.5px; font-weight:300}
-details.acc .in > *:first-child{margin-top:15px}
+details.acc > summary::after{content:"+"; margin-left:auto; color:var(--ink-3); font:400 17px var(--mono); line-height:1}
+details.acc[open] > summary::after{content:"−"; color:var(--accent)}
+details.acc > summary:hover{background:var(--s2)}
+details.acc[open] > summary{border-bottom:1px solid var(--line)}
+details.acc .in{padding:4px 20px 20px; color:var(--ink-2); font-size:14.5px; line-height:1.62}
+details.acc .in > *:first-child{margin-top:16px}
 details.acc .in p:last-child{margin-bottom:0}
-.qn{font:600 11px var(--mono); color:var(--clean); flex:0 0 auto}
+.qn{font:500 11px var(--mono); color:var(--accent); flex:0 0 auto}
 
-footer{margin-top:76px; border-top:1px solid var(--hair); padding:30px 0 60px; color:var(--ink-3); font-size:13px; font-weight:300}
+footer{margin-top:calc(var(--u)*10); border-top:1px solid var(--line); padding:28px 0 60px; color:var(--ink-3); font-size:13px; line-height:1.6}
 footer a{color:var(--ink-2)}
-.flinks{display:flex; gap:20px; flex-wrap:wrap; margin-top:10px}
+.flinks{display:flex; gap:20px; flex-wrap:wrap; margin-top:10px; font-family:var(--mono); font-size:12px}
+
+/* ── print: a report should print ───────────────────────────────────────── */
+@media print{
+  :root{--black:#fff; --s1:#fff; --s2:#fafafa; --s3:#f4f4f4; --line:#ddd; --line-2:#bbb;
+        --ink:#111; --ink-2:#333; --ink-3:#666; --accent:#a05a00}
+  body{background:#fff; color:#111; font-size:10pt}
+  .top,.lin-ctl,.copy,#prog,.split .list{display:none}
+  section{padding:18pt 0 0; page-break-inside:auto}
+  .shead h2{font-size:15pt} .cover h1{font-size:26pt}
+  .tw,.card,.note,pre,details.acc{break-inside:avoid}
+  details.acc{border:1px solid #ddd} details.acc .in{display:block!important}
+  a[href^="http"]::after{content:" (" attr(href) ")"; font-size:8pt; color:#666}
+}
 </style>
 </head>
 <body>
 
 <div class="top">
   <div class="top-in">
-    <div class="brand"><span class="mk"></span> GTM Intelligence Platform</div>
+    <div class="brand"><span class="nm">GTM Intelligence Platform</span><span class="sep"></span><span class="sub">Project report</span></div>
+    <div id="prog"></div>
     <nav id="nav">
-      <a href="#problem">1 Problem</a>
-      <a href="#data">2 Data</a>
-      <a href="#eda">3 EDA</a>
-      <a href="#approach">4 Approach</a>
-      <a href="#models">5 Models</a>
-      <a href="#identity">6 Identity</a>
-      <a href="#surfaces">7 Surfaces</a>
-      <a href="#resolution">8 Resolution</a>
-      <a href="#output">9 Output</a>
-      <a href="#quality">10 Quality</a>
-      <a href="#tests">11 Tests</a>
-      <a href="#memo">12 Memo</a>
-      <a href="#limits">13 Limits</a>
+      <a href="#problem"><i>1</i>Problem</a>
+      <a href="#data"><i>2</i>Data</a>
+      <a href="#eda"><i>3</i>EDA</a>
+      <a href="#approach"><i>4</i>Approach</a>
+      <a href="#models"><i>5</i>Models</a>
+      <a href="#identity"><i>6</i>Identity</a>
+      <a href="#surfaces"><i>7</i>Surfaces</a>
+      <a href="#resolution"><i>8</i>Resolution</a>
+      <a href="#output"><i>9</i>Output</a>
+      <a href="#quality"><i>10</i>Quality</a>
+      <a href="#tests"><i>11</i>Tests</a>
+      <a href="#memo"><i>12</i>Memo</a>
+      <a href="#limits"><i>13</i>Limits</a>
     </nav>
   </div>
 </div>
@@ -396,7 +357,7 @@ footer a{color:var(--ink-2)}
 
   <!-- ═══ COVER ═══════════════════════════════════════════════════════════ -->
   <header class="cover">
-    <div class="kicker"><span class="pulse"></span> Project report</div>
+    <div class="kicker">Project report · GTM data platform · dbt</div>
     <h1>GTM Intelligence Platform</h1>
     <p class="deck">
       A lightweight customer data platform built on dbt. It takes product usage, Salesforce and a
@@ -429,17 +390,20 @@ footer a{color:var(--ink-2)}
 
     <div class="g3">
       <div class="card">
-        <h4 style="color:var(--raw)">Product usage</h4>
+        <span class="tag t-raw" style="margin-bottom:10px">Source 1</span>
+        <h4>Product usage</h4>
         <p>Who does what inside the product, and through which surface: web UI, SDK, CLI, MCP. Users,
         orgs, projects, objects, page views, API keys, trace volume.</p>
       </div>
       <div class="card">
-        <h4 style="color:var(--clean)">CRM</h4>
+        <span class="tag t-clean" style="margin-bottom:10px">Source 2</span>
+        <h4>CRM</h4>
         <p>Salesforce accounts and a partial map from product org to account. Domains and LinkedIn URLs
         are present on some accounts and missing on others.</p>
       </div>
       <div class="card">
-        <h4 style="color:var(--uni)">External intelligence</h4>
+        <span class="tag t-uni" style="margin-bottom:10px">Source 3</span>
+        <h4>External intelligence</h4>
         <p>A vendor feed of company news, product launches and technology detections. It carries no
         Salesforce id at all, only a messy website, a LinkedIn URL and a LinkedIn-reported domain.</p>
       </div>
@@ -683,7 +647,7 @@ footer a{color:var(--ink-2)}
       measured rather than expected.
     </p>
 
-    <h3 style="font-size:16px; margin:0 0 12px; color:var(--clean)">Cleansed, where the decisions are made</h3>
+    <h3 style="font-size:16px; margin:0 0 12px">Cleansed <span class="dim" style="font-weight:400">— where the decisions are made</span></h3>
     <div class="tw" style="margin-bottom:26px">
       <table>
         <thead><tr>
@@ -694,7 +658,7 @@ footer a{color:var(--ink-2)}
       </table>
     </div>
 
-    <h3 style="font-size:16px; margin:0 0 12px; color:var(--uni)">Unified, shape only, no new logic</h3>
+    <h3 style="font-size:16px; margin:0 0 12px">Unified <span class="dim" style="font-weight:400">— shape only, no new logic</span></h3>
     <div class="tw">
       <table>
         <thead><tr>
@@ -1271,12 +1235,12 @@ python docs/build_report_data.py <span class="c"># refresh every number on this 
      BUILD / N / E — docs/build_lineage.py, read out of target/manifest.json
    ══════════════════════════════════════════════════════════════════════════ */
 /* ==REPORTDATA:BEGIN — generated by docs/build_report_data.py, do not edit== */
-var DATA = {"gen":"2026-09-14 06:31 UTC","totals":{"seedRows":163,"seedCols":77,"objects":31,"activities":44,"attributed":42,"nullCells":40,"cells":714},"profile":[{"n":"raw_users","g":"product","rows":9,"cols":3,"c":[{"n":"user_id","t":"varchar","null":0,"d":9,"uniq":true},{"n":"email","t":"varchar","null":0,"d":8,"uniq":false},{"n":"created_at","t":"timestamp","null":0,"d":9,"uniq":true}]},{"n":"raw_members","g":"product","rows":11,"cols":3,"c":[{"n":"org_id","t":"varchar","null":0,"d":6,"uniq":false},{"n":"user_id","t":"varchar","null":0,"d":9,"uniq":false},{"n":"member_created_at","t":"timestamp","null":0,"d":11,"uniq":true}]},{"n":"raw_organizations","g":"product","rows":6,"cols":4,"c":[{"n":"org_id","t":"varchar","null":0,"d":6,"uniq":true},{"n":"org_name","t":"varchar","null":0,"d":6,"uniq":true},{"n":"created_at","t":"timestamp","null":0,"d":6,"uniq":true},{"n":"plan","t":"varchar","null":0,"d":3,"uniq":false}]},{"n":"raw_projects","g":"product","rows":7,"cols":3,"c":[{"n":"project_id","t":"varchar","null":0,"d":7,"uniq":true},{"n":"org_id","t":"varchar","null":0,"d":6,"uniq":false},{"n":"name","t":"varchar","null":0,"d":7,"uniq":true}]},{"n":"raw_experiments","g":"product","rows":22,"cols":6,"c":[{"n":"id","t":"varchar","null":0,"d":22,"uniq":true},{"n":"project_id","t":"varchar","null":0,"d":6,"uniq":false},{"n":"user_id","t":"varchar","null":0,"d":9,"uniq":false},{"n":"created","t":"timestamp","null":0,"d":22,"uniq":true},{"n":"repo_info","t":"varchar","null":5,"d":17,"uniq":false},{"n":"metadata","t":"varchar","null":3,"d":19,"uniq":false}]},{"n":"raw_datasets","g":"product","rows":5,"cols":5,"c":[{"n":"id","t":"varchar","null":0,"d":5,"uniq":true},{"n":"project_id","t":"varchar","null":0,"d":5,"uniq":true},{"n":"user_id","t":"varchar","null":0,"d":5,"uniq":true},{"n":"created","t":"timestamp","null":0,"d":5,"uniq":true},{"n":"metadata","t":"varchar","null":3,"d":2,"uniq":false}]},{"n":"raw_prompts","g":"product","rows":4,"cols":4,"c":[{"n":"id","t":"varchar","null":0,"d":4,"uniq":true},{"n":"project_id","t":"varchar","null":0,"d":3,"uniq":false},{"n":"user_id","t":"varchar","null":0,"d":4,"uniq":true},{"n":"created","t":"timestamp","null":0,"d":4,"uniq":true}]},{"n":"raw_segment_pages","g":"product","rows":10,"cols":4,"c":[{"n":"anonymous_id","t":"varchar","null":0,"d":5,"uniq":false},{"n":"user_id","t":"varchar","null":2,"d":4,"uniq":false},{"n":"timestamp","t":"timestamp","null":0,"d":10,"uniq":true},{"n":"path","t":"varchar","null":0,"d":7,"uniq":false}]},{"n":"raw_cli_wizard","g":"product","rows":2,"cols":2,"c":[{"n":"user_id","t":"varchar","null":0,"d":2,"uniq":true},{"n":"timestamp","t":"timestamp","null":0,"d":2,"uniq":true}]},{"n":"raw_docs_mcp_events","g":"product","rows":2,"cols":3,"c":[{"n":"user_id","t":"varchar","null":0,"d":2,"uniq":true},{"n":"timestamp","t":"timestamp","null":0,"d":2,"uniq":true},{"n":"action","t":"varchar","null":0,"d":2,"uniq":true}]},{"n":"raw_api_keys","g":"product","rows":6,"cols":5,"c":[{"n":"id","t":"varchar","null":0,"d":6,"uniq":true},{"n":"user_id","t":"varchar","null":0,"d":6,"uniq":true},{"n":"org_id","t":"varchar","null":0,"d":4,"uniq":false},{"n":"key_hash","t":"varchar","null":0,"d":6,"uniq":true},{"n":"name","t":"varchar","null":0,"d":6,"uniq":true}]},{"n":"raw_trace_volume","g":"product","rows":32,"cols":3,"c":[{"n":"org_id","t":"varchar","null":0,"d":4,"uniq":false},{"n":"ds","t":"date","null":0,"d":8,"uniq":false},{"n":"ingested_gb","t":"double","null":0,"d":32,"uniq":true}]},{"n":"raw_salesforce_accounts","g":"crm","rows":10,"cols":5,"c":[{"n":"account_id","t":"varchar","null":0,"d":10,"uniq":true},{"n":"account_name","t":"varchar","null":0,"d":10,"uniq":true},{"n":"domain","t":"varchar","null":2,"d":7,"uniq":false},{"n":"linkedin_company_url","t":"varchar","null":3,"d":7,"uniq":false},{"n":"ticker","t":"varchar","null":9,"d":1,"uniq":false}]},{"n":"raw_account_org_map","g":"crm","rows":5,"cols":3,"c":[{"n":"org_id","t":"varchar","null":0,"d":5,"uniq":true},{"n":"account_id","t":"varchar","null":0,"d":4,"uniq":false},{"n":"mapping_source","t":"varchar","null":0,"d":3,"uniq":false}]},{"n":"raw_signal_companies","g":"signals","rows":11,"cols":5,"c":[{"n":"company_id","t":"varchar","null":0,"d":11,"uniq":true},{"n":"company_name","t":"varchar","null":0,"d":11,"uniq":true},{"n":"company_website","t":"varchar","null":1,"d":10,"uniq":false},{"n":"linkedin_url","t":"varchar","null":1,"d":10,"uniq":false},{"n":"linkedin_domain","t":"varchar","null":3,"d":7,"uniq":false}]},{"n":"raw_news_events","g":"signals","rows":10,"cols":8,"c":[{"n":"id","t":"varchar","null":0,"d":10,"uniq":true},{"n":"company_id","t":"varchar","null":0,"d":9,"uniq":false},{"n":"category","t":"varchar","null":0,"d":8,"uniq":false},{"n":"summary","t":"varchar","null":0,"d":10,"uniq":true},{"n":"found_at","t":"timestamp","null":0,"d":9,"uniq":false},{"n":"confidence","t":"double","null":0,"d":10,"uniq":true},{"n":"product_name","t":"varchar","null":8,"d":2,"uniq":false},{"n":"source_url","t":"varchar","null":0,"d":10,"uniq":true}]},{"n":"raw_products","g":"signals","rows":5,"cols":6,"c":[{"n":"id","t":"varchar","null":0,"d":5,"uniq":true},{"n":"company_id","t":"varchar","null":0,"d":5,"uniq":true},{"n":"name","t":"varchar","null":0,"d":5,"uniq":true},{"n":"category","t":"varchar","null":0,"d":5,"uniq":true},{"n":"first_seen_at","t":"timestamp","null":0,"d":5,"uniq":true},{"n":"source_url","t":"varchar","null":0,"d":5,"uniq":true}]},{"n":"raw_tech_detections","g":"signals","rows":6,"cols":5,"c":[{"n":"id","t":"varchar","null":0,"d":6,"uniq":true},{"n":"company_id","t":"varchar","null":0,"d":5,"uniq":false},{"n":"technology_name","t":"varchar","null":0,"d":6,"uniq":true},{"n":"first_seen_at","t":"timestamp","null":0,"d":5,"uniq":false},{"n":"score","t":"double","null":0,"d":6,"uniq":true}]}],"models":[{"n":"int_user_identity","l":"cleansed","rows":9},{"n":"int_org_account_resolution","l":"cleansed","rows":6},{"n":"int_org_trace_trend","l":"cleansed","rows":4},{"n":"int_match_keys","l":"cleansed","rows":21},{"n":"int_memberships","l":"cleansed","rows":10},{"n":"int_api_keys","l":"cleansed","rows":6},{"n":"int_account_trace_trend","l":"cleansed","rows":4},{"n":"int_signal_company_match_candidates","l":"cleansed","rows":34},{"n":"int_member_account_resolution","l":"cleansed","rows":8},{"n":"int_signal_company_resolution","l":"cleansed","rows":11},{"n":"int_product_activity","l":"cleansed","rows":44},{"n":"int_external_signals","l":"cleansed","rows":19},{"n":"fct_member_surface_activity","l":"unified","rows":40},{"n":"fct_account_surface_adoption","l":"unified","rows":40},{"n":"fct_account_signals","l":"unified","rows":21},{"n":"dim_members","l":"unified","rows":8},{"n":"dim_signal_companies","l":"unified","rows":11},{"n":"account_360","l":"unified","rows":10},{"n":"net_new_prospects","l":"unified","rows":2},{"n":"rpt_resolution_quality","l":"unified","rows":19}],"a":{"surface":[{"code":"cli_key_name_hint","surface":"cli","kind":"intent","attr":"heuristic","conf":0.2,"actor":"unknown","n":1},{"code":"cli_setup_wizard","surface":"cli","kind":"intent","attr":"heuristic","conf":0.3,"actor":"human","n":2},{"code":"mcp_docs_click","surface":"mcp","kind":"intent","attr":"heuristic","conf":0.3,"actor":"human","n":2},{"code":"code_ci_run","surface":"sdk","kind":"usage","attr":"deterministic","conf":0.9,"actor":"automation","n":14},{"code":"code_repo_info","surface":"sdk","kind":"usage","attr":"deterministic","conf":0.9,"actor":"human","n":4},{"code":"code_runtime_source","surface":"sdk","kind":"usage","attr":"heuristic","conf":0.6,"actor":"automation","n":1},{"code":"ui_page_view","surface":"ui","kind":"usage","attr":"deterministic","conf":0.95,"actor":"human","n":8},{"code":"object_origin_unknown","surface":"unknown","kind":"usage","attr":"none","conf":0.0,"actor":"human","n":1},{"code":"object_origin_unknown","surface":"unknown","kind":"usage","attr":"none","conf":0.0,"actor":"unknown","n":11}],"objects":[{"surface":"sdk","attr":"deterministic","n":18},{"surface":"sdk","attr":"heuristic","n":1},{"surface":"unknown","attr":"none","n":12}],"org":[{"org":"org_acme","plan":"enterprise","acct":"ACC001","src":"contract","conf":"0.95","status":"resolved"},{"org":"org_acme_eu","plan":"enterprise","acct":"ACC001","src":"billing_parent","conf":"0.85","status":"resolved"},{"org":"org_globex","plan":"pro","acct":"ACC002","src":"contract","conf":"0.95","status":"resolved"},{"org":"org_initech","plan":"pro","acct":"ACC003","src":"org_c_fallback","conf":"0.5","status":"resolved_low_confidence"},{"org":"org_nomap","plan":"free","acct":"—","src":"—","conf":"—","status":"unmapped"},{"org":"org_umbrella","plan":"pro","acct":"ACC004","src":"contract","conf":"0.95","status":"resolved"}],"people":[{"p":"u_alice","email":"alice@acme.com","orgs":"org_acme, org_acme_eu","acct":"ACC001","conf":"0.85","status":"resolved","logins":1},{"p":"u_bob","email":"bob@acme.com","orgs":"org_acme","acct":"ACC001","conf":"0.95","status":"resolved","logins":1},{"p":"u_carol","email":"carol@globex.io","orgs":"org_globex","acct":"ACC002","conf":"0.95","status":"resolved","logins":1},{"p":"u_dave","email":"dave@globex.io","orgs":"org_globex","acct":"ACC002","conf":"0.95","status":"resolved","logins":1},{"p":"u_erin","email":"erin@initech.com","orgs":"org_initech","acct":"ACC003","conf":"0.5","status":"resolved","logins":1},{"p":"u_frank","email":"frank@umbrella.co","orgs":"org_globex, org_umbrella","acct":"—","conf":"—","status":"ambiguous_multi_account","logins":1},{"p":"u_grace","email":"grace@acme.com","orgs":"org_acme","acct":"ACC001","conf":"0.95","status":"resolved","logins":2},{"p":"u_heidi","email":"heidi@startup.dev","orgs":"org_nomap","acct":"—","conf":"—","status":"org_not_mapped","logins":1}],"companies":[{"id":"sc01","name":"Acme Corporation","status":"resolved","acct":"ACC001","method":"linkedin_slug","conf":"0.95","review":false,"action":"attach_to_account","km":3,"ka":3,"uk":2,"ev":"linkedin_domain=acme.com -> ACC001, linkedin_slug=acme-corp -> ACC001, website_domain=acme.com -> ACC001"},{"id":"sc02","name":"Globex","status":"resolved","acct":"ACC002","method":"linkedin_slug","conf":"0.9","review":false,"action":"attach_to_account","km":1,"ka":1,"uk":1,"ev":"linkedin_slug=globex-industries -> ACC002"},{"id":"sc03","name":"Initech LLC","status":"resolved","acct":"ACC003","method":"website_domain","conf":"0.85","review":false,"action":"attach_to_account","km":2,"ka":2,"uk":1,"ev":"linkedin_domain=initech.com -> ACC003, website_domain=initech.com -> ACC003"},{"id":"sc04","name":"Umbrella","status":"resolved","acct":"ACC004","method":"linkedin_slug","conf":"0.95","review":false,"action":"attach_to_account","km":3,"ka":3,"uk":2,"ev":"linkedin_domain=umbrella.co -> ACC004, linkedin_slug=umbrella-labs -> ACC004, website_domain=umbrella.co -> ACC004"},{"id":"sc05","name":"Hooli Inc","status":"resolved","acct":"ACC007","method":"linkedin_slug","conf":"0.7","review":true,"action":"confirm_match","km":3,"ka":3,"uk":1,"ev":"linkedin_domain=hooli.com -> ACC006, linkedin_domain=hooli.com -> ACC007, linkedin_slug=hooli-xyz -> ACC007, website_domain=hooli.com -> ACC006, website_domain=hooli.com -> ACC007"},{"id":"sc06","name":"Hooli","status":"resolved","acct":"ACC006","method":"linkedin_slug","conf":"0.9","review":false,"action":"attach_to_account","km":3,"ka":3,"uk":1,"ev":"linkedin_domain=hooli.com -> ACC006, linkedin_domain=hooli.com -> ACC007, linkedin_slug=hooli -> ACC006, website_domain=hooli.com -> ACC006, website_domain=hooli.com -> ACC007"},{"id":"sc07","name":"Stark Industries","status":"no_identifiers","acct":"—","method":"—","conf":"—","review":false,"action":"steward_review","km":0,"ka":0,"uk":0,"ev":"—"},{"id":"sc08","name":"Wayne Enterprises Inc.","status":"resolved","acct":"ACC009","method":"linkedin_slug","conf":"0.95","review":false,"action":"attach_to_account","km":2,"ka":2,"uk":2,"ev":"linkedin_domain=wayne.com -> ACC009, linkedin_slug=wayne-ent -> ACC009"},{"id":"sc09","name":"PiedPiper","status":"resolved","acct":"ACC010","method":"linkedin_slug","conf":"0.95","review":false,"action":"attach_to_account","km":3,"ka":3,"uk":2,"ev":"linkedin_domain=piedpiper.com -> ACC010, linkedin_slug=pied-piper -> ACC010, website_domain=piedpiper.com -> ACC010"},{"id":"sc10","name":"Prospect AI","status":"unmatched","acct":"—","method":"—","conf":"—","review":false,"action":"net_new_prospect","km":0,"ka":0,"uk":0,"ev":"—"},{"id":"sc11","name":"Acme (dup record)","status":"conflict","acct":"—","method":"—","conf":"—","review":false,"action":"steward_review","km":2,"ka":1,"uk":1,"ev":"linkedin_slug=pied-piper -> ACC010, website_domain=acme.com -> ACC001"}],"members":[{"p":"u_alice","email":"alice@acme.com","acct":"ACC001","type":"human","ui":"usage_proven","sdk":"usage_proven","sdkany":"usage_proven","cli":"no_evidence","mcp":"intent_only","human":5,"auto":0,"keys":"alice-personal"},{"p":"u_bob","email":"bob@acme.com","acct":"ACC001","type":"automation_identity","ui":"no_evidence","sdk":"no_evidence","sdkany":"usage_proven","cli":"no_evidence","mcp":"no_evidence","human":0,"auto":13,"keys":"ci-service"},{"p":"u_carol","email":"carol@globex.io","acct":"ACC002","type":"human","ui":"usage_proven","sdk":"usage_proven","sdkany":"usage_proven","cli":"no_evidence","mcp":"intent_only","human":3,"auto":1,"keys":"carol-laptop"},{"p":"u_dave","email":"dave@globex.io","acct":"ACC002","type":"human","ui":"usage_proven","sdk":"no_evidence","sdkany":"usage_proven","cli":"intent_only","mcp":"no_evidence","human":1,"auto":1,"keys":"dave-cli"},{"p":"u_erin","email":"erin@initech.com","acct":"ACC003","type":"human","ui":"usage_proven","sdk":"no_evidence","sdkany":"no_evidence","cli":"no_evidence","mcp":"no_evidence","human":2,"auto":0,"keys":"default"},{"p":"u_frank","email":"frank@umbrella.co","acct":"—","type":"human","ui":"no_evidence","sdk":"usage_proven","sdkany":"usage_proven","cli":"intent_only","mcp":"no_evidence","human":1,"auto":0,"keys":"frank-key"},{"p":"u_grace","email":"grace@acme.com","acct":"ACC001","type":"undetermined","ui":"no_evidence","sdk":"no_evidence","sdkany":"no_evidence","cli":"no_evidence","mcp":"no_evidence","human":0,"auto":0,"keys":"—"},{"p":"u_heidi","email":"heidi@startup.dev","acct":"—","type":"human","ui":"no_evidence","sdk":"usage_proven","sdkany":"usage_proven","cli":"no_evidence","mcp":"no_evidence","human":1,"auto":0,"keys":"—"}],"adoption":[{"acct":"ACC001","surface":"ui","meas":true,"known":3,"proven":1,"intent":0,"auto":0,"status":"usage_proven","level":"member","pct":0.3333,"summary":"1 of 3 known members show proven UI usage"},{"acct":"ACC001","surface":"sdk","meas":true,"known":3,"proven":1,"intent":0,"auto":1,"status":"usage_proven","level":"member","pct":0.3333,"summary":"1 of 3 known members show proven code-based (SDK, or CLI running the SDK) usage; 13 more runs came from automation (CI / production jobs) using a member's key; the org also ingests traces programmatically (299.6 GB in 7 days, not attributable to a member)"},{"acct":"ACC001","surface":"cli","meas":false,"known":3,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"CLI usage is not measurable; 0 of 3 known members showed setup intent"},{"acct":"ACC001","surface":"mcp","meas":false,"known":3,"proven":0,"intent":1,"auto":0,"status":"intent_only","level":"member","pct":null,"summary":"MCP usage is not measurable; 1 of 3 known members showed setup intent"},{"acct":"ACC002","surface":"ui","meas":true,"known":3,"proven":2,"intent":0,"auto":0,"status":"usage_proven","level":"member","pct":0.6667,"summary":"2 of 3 known members show proven UI usage"},{"acct":"ACC002","surface":"sdk","meas":true,"known":3,"proven":1,"intent":0,"auto":1,"status":"usage_proven","level":"member","pct":0.3333,"summary":"1 of 3 known members show proven code-based (SDK, or CLI running the SDK) usage; 2 more runs came from automation (CI / production jobs) using a member's key; the org also ingests traces programmatically (103.6 GB in 7 days, not attributable to a member)"},{"acct":"ACC002","surface":"cli","meas":false,"known":3,"proven":0,"intent":1,"auto":0,"status":"intent_only","level":"member","pct":null,"summary":"CLI usage is not measurable; 1 of 3 known members showed setup intent (intent from 1 member(s) who also belong to another account is not counted)"},{"acct":"ACC002","surface":"mcp","meas":false,"known":3,"proven":0,"intent":1,"auto":0,"status":"intent_only","level":"member","pct":null,"summary":"MCP usage is not measurable; 1 of 3 known members showed setup intent"},{"acct":"ACC003","surface":"ui","meas":true,"known":1,"proven":1,"intent":0,"auto":0,"status":"usage_proven","level":"member","pct":1.0,"summary":"1 of 1 known members show proven UI usage"},{"acct":"ACC003","surface":"sdk","meas":true,"known":1,"proven":0,"intent":0,"auto":0,"status":"usage_proven","level":"org","pct":0.0,"summary":"0 of 1 known members show proven code-based (SDK, or CLI running the SDK) usage; the org also ingests traces programmatically (40.6 GB in 7 days, not attributable to a member)"},{"acct":"ACC003","surface":"cli","meas":false,"known":1,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"CLI usage is not measurable; 0 of 1 known members showed setup intent"},{"acct":"ACC003","surface":"mcp","meas":false,"known":1,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"MCP usage is not measurable; 0 of 1 known members showed setup intent"},{"acct":"ACC004","surface":"ui","meas":true,"known":1,"proven":0,"intent":0,"auto":0,"status":"no_evidence","level":"none","pct":0.0,"summary":"0 of 1 known members show proven UI usage"},{"acct":"ACC004","surface":"sdk","meas":true,"known":1,"proven":1,"intent":0,"auto":0,"status":"usage_proven","level":"member","pct":1.0,"summary":"1 of 1 known members show proven code-based (SDK, or CLI running the SDK) usage; the org also ingests traces programmatically (30.1 GB in 7 days, not attributable to a member)"},{"acct":"ACC004","surface":"cli","meas":false,"known":1,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"CLI usage is not measurable; 0 of 1 known members showed setup intent (intent from 1 member(s) who also belong to another account is not counted)"},{"acct":"ACC004","surface":"mcp","meas":false,"known":1,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"MCP usage is not measurable; 0 of 1 known members showed setup intent"},{"acct":"ACC005","surface":"ui","meas":true,"known":0,"proven":0,"intent":0,"auto":0,"status":"no_evidence","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC005","surface":"sdk","meas":true,"known":0,"proven":0,"intent":0,"auto":0,"status":"no_evidence","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC005","surface":"cli","meas":false,"known":0,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC005","surface":"mcp","meas":false,"known":0,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC006","surface":"ui","meas":true,"known":0,"proven":0,"intent":0,"auto":0,"status":"no_evidence","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC006","surface":"sdk","meas":true,"known":0,"proven":0,"intent":0,"auto":0,"status":"no_evidence","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC006","surface":"cli","meas":false,"known":0,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC006","surface":"mcp","meas":false,"known":0,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC007","surface":"ui","meas":true,"known":0,"proven":0,"intent":0,"auto":0,"status":"no_evidence","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC007","surface":"sdk","meas":true,"known":0,"proven":0,"intent":0,"auto":0,"status":"no_evidence","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC007","surface":"cli","meas":false,"known":0,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC007","surface":"mcp","meas":false,"known":0,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC008","surface":"ui","meas":true,"known":0,"proven":0,"intent":0,"auto":0,"status":"no_evidence","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC008","surface":"sdk","meas":true,"known":0,"proven":0,"intent":0,"auto":0,"status":"no_evidence","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC008","surface":"cli","meas":false,"known":0,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC008","surface":"mcp","meas":false,"known":0,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC009","surface":"ui","meas":true,"known":0,"proven":0,"intent":0,"auto":0,"status":"no_evidence","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC009","surface":"sdk","meas":true,"known":0,"proven":0,"intent":0,"auto":0,"status":"no_evidence","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC009","surface":"cli","meas":false,"known":0,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC009","surface":"mcp","meas":false,"known":0,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC010","surface":"ui","meas":true,"known":0,"proven":0,"intent":0,"auto":0,"status":"no_evidence","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC010","surface":"sdk","meas":true,"known":0,"proven":0,"intent":0,"auto":0,"status":"no_evidence","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC010","surface":"cli","meas":false,"known":0,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC010","surface":"mcp","meas":false,"known":0,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"No product members mapped to this account."}],"a360":[{"rank":1,"id":"ACC002","name":"Globex","plan":"pro","members":3,"active":2,"ui":"usage_proven","sdk":"usage_proven","sdklvl":"member","cli":"intent_only","mcp":"intent_only","gb":103.6,"growth":0.4083,"sig":3,"review":0,"pend":0,"conf":0,"reasons":"Trace ingestion up 41% in 7 days (12.0 -> 16.9 GB/day) on a non-Enterprise plan | Globex expands to EU | 2 member(s) exploring CLI, MCP setup (intent, not proven usage)","gaps":"missing domain"},{"rank":2,"id":"ACC001","name":"Acme Corp","plan":"enterprise","members":3,"active":2,"ui":"usage_proven","sdk":"usage_proven","sdklvl":"member","cli":"not_measurable","mcp":"intent_only","gb":299.6,"growth":0.1225,"sig":3,"review":0,"pend":1,"conf":0,"reasons":"Acme acquires a small analytics startup | Acme launches Acme Copilot | 1 member(s) exploring MCP setup (intent, not proven usage)","gaps":"—"},{"rank":3,"id":"ACC004","name":"Umbrella Labs","plan":"pro","members":1,"active":1,"ui":"no_evidence","sdk":"usage_proven","sdklvl":"member","cli":"not_measurable","mcp":"not_measurable","gb":30.1,"growth":3.2667,"sig":1,"review":0,"pend":0,"conf":0,"reasons":"Trace ingestion up 327% in 7 days (1.5 -> 6.4 GB/day) on a non-Enterprise plan","gaps":"—"},{"rank":4,"id":"ACC006","name":"Hooli","plan":"—","members":0,"active":0,"ui":"no_evidence","sdk":"no_evidence","sdklvl":"none","cli":"not_measurable","mcp":"not_measurable","gb":null,"growth":null,"sig":1,"review":0,"pend":0,"conf":1,"reasons":"Hooli partners with a cloud vendor","gaps":"—"},{"rank":5,"id":"ACC010","name":"Pied Piper","plan":"—","members":0,"active":0,"ui":"no_evidence","sdk":"no_evidence","sdklvl":"none","cli":"not_measurable","mcp":"not_measurable","gb":null,"growth":null,"sig":1,"review":0,"pend":1,"conf":0,"reasons":"Pied Piper launches new compression API","gaps":"—"},{"rank":6,"id":"ACC003","name":"Initech","plan":"pro","members":1,"active":1,"ui":"usage_proven","sdk":"usage_proven","sdklvl":"org","cli":"not_measurable","mcp":"not_measurable","gb":40.6,"growth":1.6333,"sig":0,"review":1,"pend":0,"conf":0,"reasons":"","gaps":"missing LinkedIn"},{"rank":7,"id":"ACC005","name":"Soylent Corp","plan":"—","members":0,"active":0,"ui":"no_evidence","sdk":"no_evidence","sdklvl":"none","cli":"not_measurable","mcp":"not_measurable","gb":null,"growth":null,"sig":0,"review":0,"pend":0,"conf":0,"reasons":"","gaps":"missing LinkedIn"},{"rank":8,"id":"ACC007","name":"Hooli XYZ","plan":"—","members":0,"active":0,"ui":"no_evidence","sdk":"no_evidence","sdklvl":"none","cli":"not_measurable","mcp":"not_measurable","gb":null,"growth":null,"sig":0,"review":3,"pend":0,"conf":1,"reasons":"","gaps":"—"},{"rank":9,"id":"ACC008","name":"Stark Industries","plan":"—","members":0,"active":0,"ui":"no_evidence","sdk":"no_evidence","sdklvl":"none","cli":"not_measurable","mcp":"not_measurable","gb":null,"growth":null,"sig":0,"review":0,"pend":1,"conf":0,"reasons":"","gaps":"missing domain and LinkedIn"},{"rank":10,"id":"ACC009","name":"Wayne Enterprises","plan":"—","members":0,"active":0,"ui":"no_evidence","sdk":"no_evidence","sdklvl":"none","cli":"not_measurable","mcp":"not_measurable","gb":null,"growth":null,"sig":0,"review":1,"pend":0,"conf":0,"reasons":"","gaps":"—"}],"signals":[{"id":"ci_automation:ACC001","acct":"ACC001","src":"product","type":"ci_automation","when":"2026-07-26","head":"13 objects created by automation (CI / production jobs) in the last 30 days","conf":0.9,"attr":"org_account","aconf":0.95,"act":false,"rev":false},{"id":"news:n1","acct":"ACC001","src":"external","type":"acquires","when":"2026-07-20","head":"Acme acquires a small analytics startup","conf":0.98,"attr":"external_id_linkedin_slug","aconf":0.95,"act":true,"rev":false},{"id":"news:n2","acct":"ACC001","src":"external","type":"launches","when":"2026-07-25","head":"Acme launches Acme Copilot","conf":0.91,"attr":"external_id_linkedin_slug","aconf":0.95,"act":true,"rev":false},{"id":"surface_intent:ACC001","acct":"ACC001","src":"product","type":"surface_intent","when":"2026-07-10","head":"1 member(s) exploring MCP setup (intent, not proven usage)","conf":0.3,"attr":"single_account_member","aconf":0.85,"act":true,"rev":false},{"id":"tech:t1","acct":"ACC001","src":"external","type":"tech_detected","when":"2026-05-01","head":"Uses Datadog","conf":0.9,"attr":"external_id_linkedin_slug","aconf":0.95,"act":false,"rev":false},{"id":"tech:t2","acct":"ACC001","src":"external","type":"tech_detected","when":"2026-05-01","head":"Uses Snowflake","conf":0.8,"attr":"external_id_linkedin_slug","aconf":0.95,"act":false,"rev":false},{"id":"ci_automation:ACC002","acct":"ACC002","src":"product","type":"ci_automation","when":"2026-07-24","head":"2 objects created by automation (CI / production jobs) in the last 30 days","conf":0.9,"attr":"org_account","aconf":0.95,"act":false,"rev":false},{"id":"news:n8","acct":"ACC002","src":"external","type":"expands","when":"2026-07-23","head":"Globex expands to EU","conf":0.83,"attr":"external_id_linkedin_slug","aconf":0.9,"act":true,"rev":false},{"id":"surface_intent:ACC002","acct":"ACC002","src":"product","type":"surface_intent","when":"2026-07-12","head":"2 member(s) exploring CLI, MCP setup (intent, not proven usage)","conf":0.3,"attr":"single_account_member","aconf":0.95,"act":true,"rev":false},{"id":"tech:t3","acct":"ACC002","src":"external","type":"tech_detected","when":"2026-06-01","head":"Uses Kubernetes","conf":0.7,"attr":"external_id_linkedin_slug","aconf":0.9,"act":false,"rev":false},{"id":"usage_surge:ACC002","acct":"ACC002","src":"product","type":"usage_surge","when":"2026-07-27","head":"Trace ingestion up 41% in 7 days (12.0 -> 16.9 GB/day) on a non-Enterprise plan","conf":0.85,"attr":"org_trace_ingestion","aconf":0.95,"act":true,"rev":false},{"id":"usage_surge:ACC003","acct":"ACC003","src":"product","type":"usage_surge","when":"2026-07-27","head":"Trace ingestion up 163% in 7 days (3.0 -> 7.9 GB/day) on a non-Enterprise plan","conf":0.85,"attr":"org_trace_ingestion","aconf":0.5,"act":false,"rev":true},{"id":"product:prod2","acct":"ACC004","src":"external","type":"product_detected","when":"2026-06-01","head":"New product detected: Umbrella Shield","conf":0.8,"attr":"external_id_linkedin_slug","aconf":0.95,"act":false,"rev":false},{"id":"usage_surge:ACC004","acct":"ACC004","src":"product","type":"usage_surge","when":"2026-07-27","head":"Trace ingestion up 327% in 7 days (1.5 -> 6.4 GB/day) on a non-Enterprise plan","conf":0.85,"attr":"org_trace_ingestion","aconf":0.95,"act":true,"rev":false},{"id":"news:n4","acct":"ACC006","src":"external","type":"partners_with","when":"2026-07-19","head":"Hooli partners with a cloud vendor","conf":0.72,"attr":"external_id_linkedin_slug","aconf":0.9,"act":true,"rev":false},{"id":"news:n3","acct":"ACC007","src":"external","type":"raises_funding","when":"2026-07-18","head":"Hooli raises Series D","conf":0.95,"attr":"external_id_linkedin_slug","aconf":0.7,"act":false,"rev":true},{"id":"product:prod5","acct":"ACC007","src":"external","type":"product_detected","when":"2026-05-15","head":"New product detected: Hooli Search","conf":0.8,"attr":"external_id_linkedin_slug","aconf":0.7,"act":false,"rev":true},{"id":"tech:t6","acct":"ACC007","src":"external","type":"tech_detected","when":"2026-05-20","head":"Uses Elasticsearch","conf":0.85,"attr":"external_id_linkedin_slug","aconf":0.7,"act":false,"rev":true},{"id":"news:n5","acct":"ACC009","src":"external","type":"hires","when":"2026-07-21","head":"Stark Industries hires new CTO","conf":0.6,"attr":"external_id_linkedin_slug","aconf":0.95,"act":false,"rev":true},{"id":"news:n9","acct":"ACC010","src":"external","type":"launches","when":"2026-07-24","head":"Pied Piper launches new compression API","conf":0.9,"attr":"external_id_linkedin_slug","aconf":0.95,"act":true,"rev":false},{"id":"tech:t4","acct":"ACC010","src":"external","type":"tech_detected","when":"2026-06-15","head":"Uses React","conf":0.95,"attr":"external_id_linkedin_slug","aconf":0.95,"act":false,"rev":false}],"quality":[{"o":1,"area":"identity","metric":"Logins merged into an existing person (exact email)","num":1,"den":9,"rate":0.1111},{"o":2,"area":"identity","metric":"Product orgs mapped to a Salesforce account","num":5,"den":6,"rate":0.8333},{"o":3,"area":"identity","metric":"Mapped orgs whose link is low confidence (fallback)","num":1,"den":5,"rate":0.2},{"o":4,"area":"identity","metric":"People resolved to exactly one account","num":6,"den":8,"rate":0.75},{"o":5,"area":"identity","metric":"People flagged ambiguous (belong to 2+ accounts)","num":1,"den":8,"rate":0.125},{"o":6,"area":"activity","metric":"Product activities attributed to an account","num":42,"den":44,"rate":0.9545},{"o":7,"area":"activity","metric":"Page views that are anonymous (cannot be attributed)","num":2,"den":10,"rate":0.2},{"o":8,"area":"activity","metric":"Objects whose creating surface is unknown","num":12,"den":31,"rate":0.3871},{"o":9,"area":"activity","metric":"Objects created by automation (CI / production jobs)","num":15,"den":31,"rate":0.4839},{"o":10,"area":"external","metric":"External companies resolved to an account","num":8,"den":11,"rate":0.7273},{"o":11,"area":"external","metric":"Resolved companies confirmed by 2+ independent keys (distinct values)","num":4,"den":8,"rate":0.5},{"o":12,"area":"external","metric":"Resolved companies whose name also agrees (audit proxy)","num":6,"den":8,"rate":0.75},{"o":13,"area":"external","metric":"External companies in conflict (keys disagree)","num":1,"den":11,"rate":0.0909},{"o":14,"area":"external","metric":"External companies left unresolved (any reason)","num":3,"den":11,"rate":0.2727},{"o":15,"area":"external","metric":"External signals attached to an account","num":14,"den":19,"rate":0.7368},{"o":16,"area":"external","metric":"News headlines that name a different company (entity mismatch)","num":1,"den":10,"rate":0.1},{"o":17,"area":"crm","metric":"Salesforce accounts with no domain and no LinkedIn","num":1,"den":10,"rate":0.1},{"o":18,"area":"crm","metric":"Salesforce accounts sharing a domain with another account","num":2,"den":10,"rate":0.2},{"o":19,"area":"external","metric":"Resolved companies whose name points at a different account (held for review)","num":1,"den":8,"rate":0.125}],"prospects":[{"id":"external:sc10","src":"external_signal","name":"Prospect AI","dom":"prospect-ai.com","plan":"—","members":0,"sig":3,"why":"External activity from a company with no CRM account","head":"Prospect AI raises seed round"},{"id":"product:org_nomap","src":"product_signup","name":"Startup Sandbox","dom":"startup.dev","plan":"free","members":1,"sig":1,"why":"Product sign-up using us today with no CRM account","head":"—"}],"traces":[{"org":"org_acme","days":7,"gb7":299.6,"first":40.0,"last":44.9,"growth":0.1225},{"org":"org_globex","days":7,"gb7":103.6,"first":12.0,"last":16.9,"growth":0.4083},{"org":"org_initech","days":7,"gb7":40.6,"first":3.0,"last":7.9,"growth":1.6333},{"org":"org_umbrella","days":7,"gb7":30.1,"first":1.5,"last":6.4,"growth":3.2667}],"keys":[{"type":"account","id":"ACC001","name":"Acme Corp","dom":"acme.com","slug":"acme-corp","key":"acme","tok":"acme","shared":false},{"type":"account","id":"ACC002","name":"Globex","dom":"—","slug":"globex-industries","key":"globex","tok":"globex","shared":false},{"type":"account","id":"ACC003","name":"Initech","dom":"initech.com","slug":"—","key":"initech","tok":"initech","shared":false},{"type":"account","id":"ACC004","name":"Umbrella Labs","dom":"umbrella.co","slug":"umbrella-labs","key":"umbrellalabs","tok":"umbrella","shared":false},{"type":"account","id":"ACC005","name":"Soylent Corp","dom":"soylent.com","slug":"—","key":"soylent","tok":"soylent","shared":false},{"type":"account","id":"ACC006","name":"Hooli","dom":"hooli.com","slug":"hooli","key":"hooli","tok":"hooli","shared":true},{"type":"account","id":"ACC007","name":"Hooli XYZ","dom":"hooli.com","slug":"hooli-xyz","key":"hoolixyz","tok":"hooli","shared":true},{"type":"account","id":"ACC008","name":"Stark Industries","dom":"—","slug":"—","key":"starkindustries","tok":"stark","shared":false},{"type":"account","id":"ACC009","name":"Wayne Enterprises","dom":"wayne.com","slug":"wayne-ent","key":"wayneenterprises","tok":"wayne","shared":false},{"type":"account","id":"ACC010","name":"Pied Piper","dom":"piedpiper.com","slug":"pied-piper","key":"piedpiper","tok":"pied","shared":false},{"type":"company","id":"sc01","name":"Acme Corporation","dom":"acme.com","slug":"acme-corp","key":"acme","tok":"acme","shared":true},{"type":"company","id":"sc02","name":"Globex","dom":"globex.io","slug":"globex-industries","key":"globex","tok":"globex","shared":false},{"type":"company","id":"sc03","name":"Initech LLC","dom":"initech.com","slug":"initech-software","key":"initech","tok":"initech","shared":false},{"type":"company","id":"sc04","name":"Umbrella","dom":"umbrella.co","slug":"umbrella-labs","key":"umbrella","tok":"umbrella","shared":false},{"type":"company","id":"sc05","name":"Hooli Inc","dom":"hooli.com","slug":"hooli-xyz","key":"hooli","tok":"hooli","shared":true},{"type":"company","id":"sc06","name":"Hooli","dom":"hooli.com","slug":"hooli","key":"hooli","tok":"hooli","shared":true},{"type":"company","id":"sc07","name":"Stark Industries","dom":"—","slug":"—","key":"starkindustries","tok":"stark","shared":false},{"type":"company","id":"sc08","name":"Wayne Enterprises Inc.","dom":"wayne-enterprises.com","slug":"wayne-ent","key":"wayneenterprises","tok":"wayne","shared":false},{"type":"company","id":"sc09","name":"PiedPiper","dom":"piedpiper.com","slug":"pied-piper","key":"piedpiper","tok":"piedpiper","shared":false},{"type":"company","id":"sc10","name":"Prospect AI","dom":"prospect-ai.com","slug":"prospect-ai","key":"prospectai","tok":"prospect","shared":false},{"type":"company","id":"sc11","name":"Acme (dup record)","dom":"acme.com","slug":"pied-piper","key":"acmeduprecord","tok":"acme","shared":true}]}};
+var DATA = {"gen":"2026-09-14 07:01 UTC","totals":{"seedRows":163,"seedCols":77,"objects":31,"activities":44,"attributed":42,"nullCells":40,"cells":714},"profile":[{"n":"raw_users","g":"product","rows":9,"cols":3,"c":[{"n":"user_id","t":"varchar","null":0,"d":9,"uniq":true},{"n":"email","t":"varchar","null":0,"d":8,"uniq":false},{"n":"created_at","t":"timestamp","null":0,"d":9,"uniq":true}]},{"n":"raw_members","g":"product","rows":11,"cols":3,"c":[{"n":"org_id","t":"varchar","null":0,"d":6,"uniq":false},{"n":"user_id","t":"varchar","null":0,"d":9,"uniq":false},{"n":"member_created_at","t":"timestamp","null":0,"d":11,"uniq":true}]},{"n":"raw_organizations","g":"product","rows":6,"cols":4,"c":[{"n":"org_id","t":"varchar","null":0,"d":6,"uniq":true},{"n":"org_name","t":"varchar","null":0,"d":6,"uniq":true},{"n":"created_at","t":"timestamp","null":0,"d":6,"uniq":true},{"n":"plan","t":"varchar","null":0,"d":3,"uniq":false}]},{"n":"raw_projects","g":"product","rows":7,"cols":3,"c":[{"n":"project_id","t":"varchar","null":0,"d":7,"uniq":true},{"n":"org_id","t":"varchar","null":0,"d":6,"uniq":false},{"n":"name","t":"varchar","null":0,"d":7,"uniq":true}]},{"n":"raw_experiments","g":"product","rows":22,"cols":6,"c":[{"n":"id","t":"varchar","null":0,"d":22,"uniq":true},{"n":"project_id","t":"varchar","null":0,"d":6,"uniq":false},{"n":"user_id","t":"varchar","null":0,"d":9,"uniq":false},{"n":"created","t":"timestamp","null":0,"d":22,"uniq":true},{"n":"repo_info","t":"varchar","null":5,"d":17,"uniq":false},{"n":"metadata","t":"varchar","null":3,"d":19,"uniq":false}]},{"n":"raw_datasets","g":"product","rows":5,"cols":5,"c":[{"n":"id","t":"varchar","null":0,"d":5,"uniq":true},{"n":"project_id","t":"varchar","null":0,"d":5,"uniq":true},{"n":"user_id","t":"varchar","null":0,"d":5,"uniq":true},{"n":"created","t":"timestamp","null":0,"d":5,"uniq":true},{"n":"metadata","t":"varchar","null":3,"d":2,"uniq":false}]},{"n":"raw_prompts","g":"product","rows":4,"cols":4,"c":[{"n":"id","t":"varchar","null":0,"d":4,"uniq":true},{"n":"project_id","t":"varchar","null":0,"d":3,"uniq":false},{"n":"user_id","t":"varchar","null":0,"d":4,"uniq":true},{"n":"created","t":"timestamp","null":0,"d":4,"uniq":true}]},{"n":"raw_segment_pages","g":"product","rows":10,"cols":4,"c":[{"n":"anonymous_id","t":"varchar","null":0,"d":5,"uniq":false},{"n":"user_id","t":"varchar","null":2,"d":4,"uniq":false},{"n":"timestamp","t":"timestamp","null":0,"d":10,"uniq":true},{"n":"path","t":"varchar","null":0,"d":7,"uniq":false}]},{"n":"raw_cli_wizard","g":"product","rows":2,"cols":2,"c":[{"n":"user_id","t":"varchar","null":0,"d":2,"uniq":true},{"n":"timestamp","t":"timestamp","null":0,"d":2,"uniq":true}]},{"n":"raw_docs_mcp_events","g":"product","rows":2,"cols":3,"c":[{"n":"user_id","t":"varchar","null":0,"d":2,"uniq":true},{"n":"timestamp","t":"timestamp","null":0,"d":2,"uniq":true},{"n":"action","t":"varchar","null":0,"d":2,"uniq":true}]},{"n":"raw_api_keys","g":"product","rows":6,"cols":5,"c":[{"n":"id","t":"varchar","null":0,"d":6,"uniq":true},{"n":"user_id","t":"varchar","null":0,"d":6,"uniq":true},{"n":"org_id","t":"varchar","null":0,"d":4,"uniq":false},{"n":"key_hash","t":"varchar","null":0,"d":6,"uniq":true},{"n":"name","t":"varchar","null":0,"d":6,"uniq":true}]},{"n":"raw_trace_volume","g":"product","rows":32,"cols":3,"c":[{"n":"org_id","t":"varchar","null":0,"d":4,"uniq":false},{"n":"ds","t":"date","null":0,"d":8,"uniq":false},{"n":"ingested_gb","t":"double","null":0,"d":32,"uniq":true}]},{"n":"raw_salesforce_accounts","g":"crm","rows":10,"cols":5,"c":[{"n":"account_id","t":"varchar","null":0,"d":10,"uniq":true},{"n":"account_name","t":"varchar","null":0,"d":10,"uniq":true},{"n":"domain","t":"varchar","null":2,"d":7,"uniq":false},{"n":"linkedin_company_url","t":"varchar","null":3,"d":7,"uniq":false},{"n":"ticker","t":"varchar","null":9,"d":1,"uniq":false}]},{"n":"raw_account_org_map","g":"crm","rows":5,"cols":3,"c":[{"n":"org_id","t":"varchar","null":0,"d":5,"uniq":true},{"n":"account_id","t":"varchar","null":0,"d":4,"uniq":false},{"n":"mapping_source","t":"varchar","null":0,"d":3,"uniq":false}]},{"n":"raw_signal_companies","g":"signals","rows":11,"cols":5,"c":[{"n":"company_id","t":"varchar","null":0,"d":11,"uniq":true},{"n":"company_name","t":"varchar","null":0,"d":11,"uniq":true},{"n":"company_website","t":"varchar","null":1,"d":10,"uniq":false},{"n":"linkedin_url","t":"varchar","null":1,"d":10,"uniq":false},{"n":"linkedin_domain","t":"varchar","null":3,"d":7,"uniq":false}]},{"n":"raw_news_events","g":"signals","rows":10,"cols":8,"c":[{"n":"id","t":"varchar","null":0,"d":10,"uniq":true},{"n":"company_id","t":"varchar","null":0,"d":9,"uniq":false},{"n":"category","t":"varchar","null":0,"d":8,"uniq":false},{"n":"summary","t":"varchar","null":0,"d":10,"uniq":true},{"n":"found_at","t":"timestamp","null":0,"d":9,"uniq":false},{"n":"confidence","t":"double","null":0,"d":10,"uniq":true},{"n":"product_name","t":"varchar","null":8,"d":2,"uniq":false},{"n":"source_url","t":"varchar","null":0,"d":10,"uniq":true}]},{"n":"raw_products","g":"signals","rows":5,"cols":6,"c":[{"n":"id","t":"varchar","null":0,"d":5,"uniq":true},{"n":"company_id","t":"varchar","null":0,"d":5,"uniq":true},{"n":"name","t":"varchar","null":0,"d":5,"uniq":true},{"n":"category","t":"varchar","null":0,"d":5,"uniq":true},{"n":"first_seen_at","t":"timestamp","null":0,"d":5,"uniq":true},{"n":"source_url","t":"varchar","null":0,"d":5,"uniq":true}]},{"n":"raw_tech_detections","g":"signals","rows":6,"cols":5,"c":[{"n":"id","t":"varchar","null":0,"d":6,"uniq":true},{"n":"company_id","t":"varchar","null":0,"d":5,"uniq":false},{"n":"technology_name","t":"varchar","null":0,"d":6,"uniq":true},{"n":"first_seen_at","t":"timestamp","null":0,"d":5,"uniq":false},{"n":"score","t":"double","null":0,"d":6,"uniq":true}]}],"models":[{"n":"int_user_identity","l":"cleansed","rows":9},{"n":"int_org_account_resolution","l":"cleansed","rows":6},{"n":"int_org_trace_trend","l":"cleansed","rows":4},{"n":"int_match_keys","l":"cleansed","rows":21},{"n":"int_memberships","l":"cleansed","rows":10},{"n":"int_api_keys","l":"cleansed","rows":6},{"n":"int_account_trace_trend","l":"cleansed","rows":4},{"n":"int_signal_company_match_candidates","l":"cleansed","rows":34},{"n":"int_member_account_resolution","l":"cleansed","rows":8},{"n":"int_signal_company_resolution","l":"cleansed","rows":11},{"n":"int_product_activity","l":"cleansed","rows":44},{"n":"int_external_signals","l":"cleansed","rows":19},{"n":"fct_member_surface_activity","l":"unified","rows":40},{"n":"fct_account_surface_adoption","l":"unified","rows":40},{"n":"fct_account_signals","l":"unified","rows":21},{"n":"dim_members","l":"unified","rows":8},{"n":"dim_signal_companies","l":"unified","rows":11},{"n":"account_360","l":"unified","rows":10},{"n":"net_new_prospects","l":"unified","rows":2},{"n":"rpt_resolution_quality","l":"unified","rows":19}],"a":{"surface":[{"code":"cli_key_name_hint","surface":"cli","kind":"intent","attr":"heuristic","conf":0.2,"actor":"unknown","n":1},{"code":"cli_setup_wizard","surface":"cli","kind":"intent","attr":"heuristic","conf":0.3,"actor":"human","n":2},{"code":"mcp_docs_click","surface":"mcp","kind":"intent","attr":"heuristic","conf":0.3,"actor":"human","n":2},{"code":"code_ci_run","surface":"sdk","kind":"usage","attr":"deterministic","conf":0.9,"actor":"automation","n":14},{"code":"code_repo_info","surface":"sdk","kind":"usage","attr":"deterministic","conf":0.9,"actor":"human","n":4},{"code":"code_runtime_source","surface":"sdk","kind":"usage","attr":"heuristic","conf":0.6,"actor":"automation","n":1},{"code":"ui_page_view","surface":"ui","kind":"usage","attr":"deterministic","conf":0.95,"actor":"human","n":8},{"code":"object_origin_unknown","surface":"unknown","kind":"usage","attr":"none","conf":0.0,"actor":"human","n":1},{"code":"object_origin_unknown","surface":"unknown","kind":"usage","attr":"none","conf":0.0,"actor":"unknown","n":11}],"objects":[{"surface":"sdk","attr":"deterministic","n":18},{"surface":"sdk","attr":"heuristic","n":1},{"surface":"unknown","attr":"none","n":12}],"org":[{"org":"org_acme","plan":"enterprise","acct":"ACC001","src":"contract","conf":"0.95","status":"resolved"},{"org":"org_acme_eu","plan":"enterprise","acct":"ACC001","src":"billing_parent","conf":"0.85","status":"resolved"},{"org":"org_globex","plan":"pro","acct":"ACC002","src":"contract","conf":"0.95","status":"resolved"},{"org":"org_initech","plan":"pro","acct":"ACC003","src":"org_c_fallback","conf":"0.5","status":"resolved_low_confidence"},{"org":"org_nomap","plan":"free","acct":"—","src":"—","conf":"—","status":"unmapped"},{"org":"org_umbrella","plan":"pro","acct":"ACC004","src":"contract","conf":"0.95","status":"resolved"}],"people":[{"p":"u_alice","email":"alice@acme.com","orgs":"org_acme, org_acme_eu","acct":"ACC001","conf":"0.85","status":"resolved","logins":1},{"p":"u_bob","email":"bob@acme.com","orgs":"org_acme","acct":"ACC001","conf":"0.95","status":"resolved","logins":1},{"p":"u_carol","email":"carol@globex.io","orgs":"org_globex","acct":"ACC002","conf":"0.95","status":"resolved","logins":1},{"p":"u_dave","email":"dave@globex.io","orgs":"org_globex","acct":"ACC002","conf":"0.95","status":"resolved","logins":1},{"p":"u_erin","email":"erin@initech.com","orgs":"org_initech","acct":"ACC003","conf":"0.5","status":"resolved","logins":1},{"p":"u_frank","email":"frank@umbrella.co","orgs":"org_globex, org_umbrella","acct":"—","conf":"—","status":"ambiguous_multi_account","logins":1},{"p":"u_grace","email":"grace@acme.com","orgs":"org_acme","acct":"ACC001","conf":"0.95","status":"resolved","logins":2},{"p":"u_heidi","email":"heidi@startup.dev","orgs":"org_nomap","acct":"—","conf":"—","status":"org_not_mapped","logins":1}],"companies":[{"id":"sc01","name":"Acme Corporation","status":"resolved","acct":"ACC001","method":"linkedin_slug","conf":"0.95","review":false,"action":"attach_to_account","km":3,"ka":3,"uk":2,"ev":"linkedin_domain=acme.com -> ACC001, linkedin_slug=acme-corp -> ACC001, website_domain=acme.com -> ACC001","nameacct":"ACC001","namekey":"acme"},{"id":"sc02","name":"Globex","status":"resolved","acct":"ACC002","method":"linkedin_slug","conf":"0.9","review":false,"action":"attach_to_account","km":1,"ka":1,"uk":1,"ev":"linkedin_slug=globex-industries -> ACC002","nameacct":"ACC002","namekey":"globex"},{"id":"sc03","name":"Initech LLC","status":"resolved","acct":"ACC003","method":"website_domain","conf":"0.85","review":false,"action":"attach_to_account","km":2,"ka":2,"uk":1,"ev":"linkedin_domain=initech.com -> ACC003, website_domain=initech.com -> ACC003","nameacct":"ACC003","namekey":"initech"},{"id":"sc04","name":"Umbrella","status":"resolved","acct":"ACC004","method":"linkedin_slug","conf":"0.95","review":false,"action":"attach_to_account","km":3,"ka":3,"uk":2,"ev":"linkedin_domain=umbrella.co -> ACC004, linkedin_slug=umbrella-labs -> ACC004, website_domain=umbrella.co -> ACC004","nameacct":null,"namekey":"umbrella"},{"id":"sc05","name":"Hooli Inc","status":"resolved","acct":"ACC007","method":"linkedin_slug","conf":"0.7","review":true,"action":"confirm_match","km":3,"ka":3,"uk":1,"ev":"linkedin_domain=hooli.com -> ACC006, linkedin_domain=hooli.com -> ACC007, linkedin_slug=hooli-xyz -> ACC007, website_domain=hooli.com -> ACC006, website_domain=hooli.com -> ACC007","nameacct":"ACC006","namekey":"hooli"},{"id":"sc06","name":"Hooli","status":"resolved","acct":"ACC006","method":"linkedin_slug","conf":"0.9","review":false,"action":"attach_to_account","km":3,"ka":3,"uk":1,"ev":"linkedin_domain=hooli.com -> ACC006, linkedin_domain=hooli.com -> ACC007, linkedin_slug=hooli -> ACC006, website_domain=hooli.com -> ACC006, website_domain=hooli.com -> ACC007","nameacct":"ACC006","namekey":"hooli"},{"id":"sc07","name":"Stark Industries","status":"no_identifiers","acct":"—","method":"—","conf":"—","review":false,"action":"steward_review","km":0,"ka":0,"uk":0,"ev":"—","nameacct":"ACC008","namekey":"starkindustries"},{"id":"sc08","name":"Wayne Enterprises Inc.","status":"resolved","acct":"ACC009","method":"linkedin_slug","conf":"0.95","review":false,"action":"attach_to_account","km":2,"ka":2,"uk":2,"ev":"linkedin_domain=wayne.com -> ACC009, linkedin_slug=wayne-ent -> ACC009","nameacct":"ACC009","namekey":"wayneenterprises"},{"id":"sc09","name":"PiedPiper","status":"resolved","acct":"ACC010","method":"linkedin_slug","conf":"0.95","review":false,"action":"attach_to_account","km":3,"ka":3,"uk":2,"ev":"linkedin_domain=piedpiper.com -> ACC010, linkedin_slug=pied-piper -> ACC010, website_domain=piedpiper.com -> ACC010","nameacct":"ACC010","namekey":"piedpiper"},{"id":"sc10","name":"Prospect AI","status":"unmatched","acct":"—","method":"—","conf":"—","review":false,"action":"net_new_prospect","km":0,"ka":0,"uk":0,"ev":"—","nameacct":null,"namekey":"prospectai"},{"id":"sc11","name":"Acme (dup record)","status":"conflict","acct":"—","method":"—","conf":"—","review":false,"action":"steward_review","km":2,"ka":1,"uk":1,"ev":"linkedin_slug=pied-piper -> ACC010, website_domain=acme.com -> ACC001","nameacct":null,"namekey":"acmeduprecord"}],"members":[{"p":"u_alice","email":"alice@acme.com","acct":"ACC001","type":"human","ui":"usage_proven","sdk":"usage_proven","sdkany":"usage_proven","cli":"no_evidence","mcp":"intent_only","human":5,"auto":0,"keys":"alice-personal"},{"p":"u_bob","email":"bob@acme.com","acct":"ACC001","type":"automation_identity","ui":"no_evidence","sdk":"no_evidence","sdkany":"usage_proven","cli":"no_evidence","mcp":"no_evidence","human":0,"auto":13,"keys":"ci-service"},{"p":"u_carol","email":"carol@globex.io","acct":"ACC002","type":"human","ui":"usage_proven","sdk":"usage_proven","sdkany":"usage_proven","cli":"no_evidence","mcp":"intent_only","human":3,"auto":1,"keys":"carol-laptop"},{"p":"u_dave","email":"dave@globex.io","acct":"ACC002","type":"human","ui":"usage_proven","sdk":"no_evidence","sdkany":"usage_proven","cli":"intent_only","mcp":"no_evidence","human":1,"auto":1,"keys":"dave-cli"},{"p":"u_erin","email":"erin@initech.com","acct":"ACC003","type":"human","ui":"usage_proven","sdk":"no_evidence","sdkany":"no_evidence","cli":"no_evidence","mcp":"no_evidence","human":2,"auto":0,"keys":"default"},{"p":"u_frank","email":"frank@umbrella.co","acct":"—","type":"human","ui":"no_evidence","sdk":"usage_proven","sdkany":"usage_proven","cli":"intent_only","mcp":"no_evidence","human":1,"auto":0,"keys":"frank-key"},{"p":"u_grace","email":"grace@acme.com","acct":"ACC001","type":"undetermined","ui":"no_evidence","sdk":"no_evidence","sdkany":"no_evidence","cli":"no_evidence","mcp":"no_evidence","human":0,"auto":0,"keys":"—"},{"p":"u_heidi","email":"heidi@startup.dev","acct":"—","type":"human","ui":"no_evidence","sdk":"usage_proven","sdkany":"usage_proven","cli":"no_evidence","mcp":"no_evidence","human":1,"auto":0,"keys":"—"}],"adoption":[{"acct":"ACC001","surface":"ui","meas":true,"known":3,"proven":1,"intent":0,"auto":0,"status":"usage_proven","level":"member","pct":0.3333,"summary":"1 of 3 known members show proven UI usage"},{"acct":"ACC001","surface":"sdk","meas":true,"known":3,"proven":1,"intent":0,"auto":1,"status":"usage_proven","level":"member","pct":0.3333,"summary":"1 of 3 known members show proven code-based (SDK, or CLI running the SDK) usage; 13 more runs came from automation (CI / production jobs) using a member's key; the org also ingests traces programmatically (299.6 GB in 7 days, not attributable to a member)"},{"acct":"ACC001","surface":"cli","meas":false,"known":3,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"CLI usage is not measurable; 0 of 3 known members showed setup intent"},{"acct":"ACC001","surface":"mcp","meas":false,"known":3,"proven":0,"intent":1,"auto":0,"status":"intent_only","level":"member","pct":null,"summary":"MCP usage is not measurable; 1 of 3 known members showed setup intent"},{"acct":"ACC002","surface":"ui","meas":true,"known":3,"proven":2,"intent":0,"auto":0,"status":"usage_proven","level":"member","pct":0.6667,"summary":"2 of 3 known members show proven UI usage"},{"acct":"ACC002","surface":"sdk","meas":true,"known":3,"proven":1,"intent":0,"auto":1,"status":"usage_proven","level":"member","pct":0.3333,"summary":"1 of 3 known members show proven code-based (SDK, or CLI running the SDK) usage; 2 more runs came from automation (CI / production jobs) using a member's key; the org also ingests traces programmatically (103.6 GB in 7 days, not attributable to a member)"},{"acct":"ACC002","surface":"cli","meas":false,"known":3,"proven":0,"intent":1,"auto":0,"status":"intent_only","level":"member","pct":null,"summary":"CLI usage is not measurable; 1 of 3 known members showed setup intent (intent from 1 member(s) who also belong to another account is not counted)"},{"acct":"ACC002","surface":"mcp","meas":false,"known":3,"proven":0,"intent":1,"auto":0,"status":"intent_only","level":"member","pct":null,"summary":"MCP usage is not measurable; 1 of 3 known members showed setup intent"},{"acct":"ACC003","surface":"ui","meas":true,"known":1,"proven":1,"intent":0,"auto":0,"status":"usage_proven","level":"member","pct":1.0,"summary":"1 of 1 known members show proven UI usage"},{"acct":"ACC003","surface":"sdk","meas":true,"known":1,"proven":0,"intent":0,"auto":0,"status":"usage_proven","level":"org","pct":0.0,"summary":"0 of 1 known members show proven code-based (SDK, or CLI running the SDK) usage; the org also ingests traces programmatically (40.6 GB in 7 days, not attributable to a member)"},{"acct":"ACC003","surface":"cli","meas":false,"known":1,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"CLI usage is not measurable; 0 of 1 known members showed setup intent"},{"acct":"ACC003","surface":"mcp","meas":false,"known":1,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"MCP usage is not measurable; 0 of 1 known members showed setup intent"},{"acct":"ACC004","surface":"ui","meas":true,"known":1,"proven":0,"intent":0,"auto":0,"status":"no_evidence","level":"none","pct":0.0,"summary":"0 of 1 known members show proven UI usage"},{"acct":"ACC004","surface":"sdk","meas":true,"known":1,"proven":1,"intent":0,"auto":0,"status":"usage_proven","level":"member","pct":1.0,"summary":"1 of 1 known members show proven code-based (SDK, or CLI running the SDK) usage; the org also ingests traces programmatically (30.1 GB in 7 days, not attributable to a member)"},{"acct":"ACC004","surface":"cli","meas":false,"known":1,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"CLI usage is not measurable; 0 of 1 known members showed setup intent (intent from 1 member(s) who also belong to another account is not counted)"},{"acct":"ACC004","surface":"mcp","meas":false,"known":1,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"MCP usage is not measurable; 0 of 1 known members showed setup intent"},{"acct":"ACC005","surface":"ui","meas":true,"known":0,"proven":0,"intent":0,"auto":0,"status":"no_evidence","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC005","surface":"sdk","meas":true,"known":0,"proven":0,"intent":0,"auto":0,"status":"no_evidence","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC005","surface":"cli","meas":false,"known":0,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC005","surface":"mcp","meas":false,"known":0,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC006","surface":"ui","meas":true,"known":0,"proven":0,"intent":0,"auto":0,"status":"no_evidence","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC006","surface":"sdk","meas":true,"known":0,"proven":0,"intent":0,"auto":0,"status":"no_evidence","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC006","surface":"cli","meas":false,"known":0,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC006","surface":"mcp","meas":false,"known":0,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC007","surface":"ui","meas":true,"known":0,"proven":0,"intent":0,"auto":0,"status":"no_evidence","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC007","surface":"sdk","meas":true,"known":0,"proven":0,"intent":0,"auto":0,"status":"no_evidence","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC007","surface":"cli","meas":false,"known":0,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC007","surface":"mcp","meas":false,"known":0,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC008","surface":"ui","meas":true,"known":0,"proven":0,"intent":0,"auto":0,"status":"no_evidence","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC008","surface":"sdk","meas":true,"known":0,"proven":0,"intent":0,"auto":0,"status":"no_evidence","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC008","surface":"cli","meas":false,"known":0,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC008","surface":"mcp","meas":false,"known":0,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC009","surface":"ui","meas":true,"known":0,"proven":0,"intent":0,"auto":0,"status":"no_evidence","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC009","surface":"sdk","meas":true,"known":0,"proven":0,"intent":0,"auto":0,"status":"no_evidence","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC009","surface":"cli","meas":false,"known":0,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC009","surface":"mcp","meas":false,"known":0,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC010","surface":"ui","meas":true,"known":0,"proven":0,"intent":0,"auto":0,"status":"no_evidence","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC010","surface":"sdk","meas":true,"known":0,"proven":0,"intent":0,"auto":0,"status":"no_evidence","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC010","surface":"cli","meas":false,"known":0,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"No product members mapped to this account."},{"acct":"ACC010","surface":"mcp","meas":false,"known":0,"proven":0,"intent":0,"auto":0,"status":"not_measurable","level":"none","pct":null,"summary":"No product members mapped to this account."}],"a360":[{"rank":1,"id":"ACC002","name":"Globex","plan":"pro","members":3,"active":2,"ui":"usage_proven","sdk":"usage_proven","sdklvl":"member","cli":"intent_only","mcp":"intent_only","gb":103.6,"growth":0.4083,"sig":3,"review":0,"pend":0,"conf":0,"reasons":"Trace ingestion up 41% in 7 days (12.0 -> 16.9 GB/day) on a non-Enterprise plan | Globex expands to EU | 2 member(s) exploring CLI, MCP setup (intent, not proven usage)","gaps":"missing domain"},{"rank":2,"id":"ACC001","name":"Acme Corp","plan":"enterprise","members":3,"active":2,"ui":"usage_proven","sdk":"usage_proven","sdklvl":"member","cli":"not_measurable","mcp":"intent_only","gb":299.6,"growth":0.1225,"sig":3,"review":0,"pend":1,"conf":0,"reasons":"Acme acquires a small analytics startup | Acme launches Acme Copilot | 1 member(s) exploring MCP setup (intent, not proven usage)","gaps":"—"},{"rank":3,"id":"ACC004","name":"Umbrella Labs","plan":"pro","members":1,"active":1,"ui":"no_evidence","sdk":"usage_proven","sdklvl":"member","cli":"not_measurable","mcp":"not_measurable","gb":30.1,"growth":3.2667,"sig":1,"review":0,"pend":0,"conf":0,"reasons":"Trace ingestion up 327% in 7 days (1.5 -> 6.4 GB/day) on a non-Enterprise plan","gaps":"—"},{"rank":4,"id":"ACC006","name":"Hooli","plan":"—","members":0,"active":0,"ui":"no_evidence","sdk":"no_evidence","sdklvl":"none","cli":"not_measurable","mcp":"not_measurable","gb":null,"growth":null,"sig":1,"review":0,"pend":0,"conf":1,"reasons":"Hooli partners with a cloud vendor","gaps":"—"},{"rank":5,"id":"ACC010","name":"Pied Piper","plan":"—","members":0,"active":0,"ui":"no_evidence","sdk":"no_evidence","sdklvl":"none","cli":"not_measurable","mcp":"not_measurable","gb":null,"growth":null,"sig":1,"review":0,"pend":1,"conf":0,"reasons":"Pied Piper launches new compression API","gaps":"—"},{"rank":6,"id":"ACC003","name":"Initech","plan":"pro","members":1,"active":1,"ui":"usage_proven","sdk":"usage_proven","sdklvl":"org","cli":"not_measurable","mcp":"not_measurable","gb":40.6,"growth":1.6333,"sig":0,"review":1,"pend":0,"conf":0,"reasons":"","gaps":"missing LinkedIn"},{"rank":7,"id":"ACC005","name":"Soylent Corp","plan":"—","members":0,"active":0,"ui":"no_evidence","sdk":"no_evidence","sdklvl":"none","cli":"not_measurable","mcp":"not_measurable","gb":null,"growth":null,"sig":0,"review":0,"pend":0,"conf":0,"reasons":"","gaps":"missing LinkedIn"},{"rank":8,"id":"ACC007","name":"Hooli XYZ","plan":"—","members":0,"active":0,"ui":"no_evidence","sdk":"no_evidence","sdklvl":"none","cli":"not_measurable","mcp":"not_measurable","gb":null,"growth":null,"sig":0,"review":3,"pend":0,"conf":1,"reasons":"","gaps":"—"},{"rank":9,"id":"ACC008","name":"Stark Industries","plan":"—","members":0,"active":0,"ui":"no_evidence","sdk":"no_evidence","sdklvl":"none","cli":"not_measurable","mcp":"not_measurable","gb":null,"growth":null,"sig":0,"review":0,"pend":1,"conf":0,"reasons":"","gaps":"missing domain and LinkedIn"},{"rank":10,"id":"ACC009","name":"Wayne Enterprises","plan":"—","members":0,"active":0,"ui":"no_evidence","sdk":"no_evidence","sdklvl":"none","cli":"not_measurable","mcp":"not_measurable","gb":null,"growth":null,"sig":0,"review":1,"pend":0,"conf":0,"reasons":"","gaps":"—"}],"signals":[{"id":"ci_automation:ACC001","acct":"ACC001","src":"product","type":"ci_automation","when":"2026-07-26","head":"13 objects created by automation (CI / production jobs) in the last 30 days","conf":0.9,"attr":"org_account","aconf":0.95,"act":false,"rev":false},{"id":"news:n1","acct":"ACC001","src":"external","type":"acquires","when":"2026-07-20","head":"Acme acquires a small analytics startup","conf":0.98,"attr":"external_id_linkedin_slug","aconf":0.95,"act":true,"rev":false},{"id":"news:n2","acct":"ACC001","src":"external","type":"launches","when":"2026-07-25","head":"Acme launches Acme Copilot","conf":0.91,"attr":"external_id_linkedin_slug","aconf":0.95,"act":true,"rev":false},{"id":"surface_intent:ACC001","acct":"ACC001","src":"product","type":"surface_intent","when":"2026-07-10","head":"1 member(s) exploring MCP setup (intent, not proven usage)","conf":0.3,"attr":"single_account_member","aconf":0.85,"act":true,"rev":false},{"id":"tech:t1","acct":"ACC001","src":"external","type":"tech_detected","when":"2026-05-01","head":"Uses Datadog","conf":0.9,"attr":"external_id_linkedin_slug","aconf":0.95,"act":false,"rev":false},{"id":"tech:t2","acct":"ACC001","src":"external","type":"tech_detected","when":"2026-05-01","head":"Uses Snowflake","conf":0.8,"attr":"external_id_linkedin_slug","aconf":0.95,"act":false,"rev":false},{"id":"ci_automation:ACC002","acct":"ACC002","src":"product","type":"ci_automation","when":"2026-07-24","head":"2 objects created by automation (CI / production jobs) in the last 30 days","conf":0.9,"attr":"org_account","aconf":0.95,"act":false,"rev":false},{"id":"news:n8","acct":"ACC002","src":"external","type":"expands","when":"2026-07-23","head":"Globex expands to EU","conf":0.83,"attr":"external_id_linkedin_slug","aconf":0.9,"act":true,"rev":false},{"id":"surface_intent:ACC002","acct":"ACC002","src":"product","type":"surface_intent","when":"2026-07-12","head":"2 member(s) exploring CLI, MCP setup (intent, not proven usage)","conf":0.3,"attr":"single_account_member","aconf":0.95,"act":true,"rev":false},{"id":"tech:t3","acct":"ACC002","src":"external","type":"tech_detected","when":"2026-06-01","head":"Uses Kubernetes","conf":0.7,"attr":"external_id_linkedin_slug","aconf":0.9,"act":false,"rev":false},{"id":"usage_surge:ACC002","acct":"ACC002","src":"product","type":"usage_surge","when":"2026-07-27","head":"Trace ingestion up 41% in 7 days (12.0 -> 16.9 GB/day) on a non-Enterprise plan","conf":0.85,"attr":"org_trace_ingestion","aconf":0.95,"act":true,"rev":false},{"id":"usage_surge:ACC003","acct":"ACC003","src":"product","type":"usage_surge","when":"2026-07-27","head":"Trace ingestion up 163% in 7 days (3.0 -> 7.9 GB/day) on a non-Enterprise plan","conf":0.85,"attr":"org_trace_ingestion","aconf":0.5,"act":false,"rev":true},{"id":"product:prod2","acct":"ACC004","src":"external","type":"product_detected","when":"2026-06-01","head":"New product detected: Umbrella Shield","conf":0.8,"attr":"external_id_linkedin_slug","aconf":0.95,"act":false,"rev":false},{"id":"usage_surge:ACC004","acct":"ACC004","src":"product","type":"usage_surge","when":"2026-07-27","head":"Trace ingestion up 327% in 7 days (1.5 -> 6.4 GB/day) on a non-Enterprise plan","conf":0.85,"attr":"org_trace_ingestion","aconf":0.95,"act":true,"rev":false},{"id":"news:n4","acct":"ACC006","src":"external","type":"partners_with","when":"2026-07-19","head":"Hooli partners with a cloud vendor","conf":0.72,"attr":"external_id_linkedin_slug","aconf":0.9,"act":true,"rev":false},{"id":"news:n3","acct":"ACC007","src":"external","type":"raises_funding","when":"2026-07-18","head":"Hooli raises Series D","conf":0.95,"attr":"external_id_linkedin_slug","aconf":0.7,"act":false,"rev":true},{"id":"product:prod5","acct":"ACC007","src":"external","type":"product_detected","when":"2026-05-15","head":"New product detected: Hooli Search","conf":0.8,"attr":"external_id_linkedin_slug","aconf":0.7,"act":false,"rev":true},{"id":"tech:t6","acct":"ACC007","src":"external","type":"tech_detected","when":"2026-05-20","head":"Uses Elasticsearch","conf":0.85,"attr":"external_id_linkedin_slug","aconf":0.7,"act":false,"rev":true},{"id":"news:n5","acct":"ACC009","src":"external","type":"hires","when":"2026-07-21","head":"Stark Industries hires new CTO","conf":0.6,"attr":"external_id_linkedin_slug","aconf":0.95,"act":false,"rev":true},{"id":"news:n9","acct":"ACC010","src":"external","type":"launches","when":"2026-07-24","head":"Pied Piper launches new compression API","conf":0.9,"attr":"external_id_linkedin_slug","aconf":0.95,"act":true,"rev":false},{"id":"tech:t4","acct":"ACC010","src":"external","type":"tech_detected","when":"2026-06-15","head":"Uses React","conf":0.95,"attr":"external_id_linkedin_slug","aconf":0.95,"act":false,"rev":false}],"quality":[{"o":1,"area":"identity","metric":"Logins merged into an existing person (exact email)","num":1,"den":9,"rate":0.1111},{"o":2,"area":"identity","metric":"Product orgs mapped to a Salesforce account","num":5,"den":6,"rate":0.8333},{"o":3,"area":"identity","metric":"Mapped orgs whose link is low confidence (fallback)","num":1,"den":5,"rate":0.2},{"o":4,"area":"identity","metric":"People resolved to exactly one account","num":6,"den":8,"rate":0.75},{"o":5,"area":"identity","metric":"People flagged ambiguous (belong to 2+ accounts)","num":1,"den":8,"rate":0.125},{"o":6,"area":"activity","metric":"Product activities attributed to an account","num":42,"den":44,"rate":0.9545},{"o":7,"area":"activity","metric":"Page views that are anonymous (cannot be attributed)","num":2,"den":10,"rate":0.2},{"o":8,"area":"activity","metric":"Objects whose creating surface is unknown","num":12,"den":31,"rate":0.3871},{"o":9,"area":"activity","metric":"Objects created by automation (CI / production jobs)","num":15,"den":31,"rate":0.4839},{"o":10,"area":"external","metric":"External companies resolved to an account","num":8,"den":11,"rate":0.7273},{"o":11,"area":"external","metric":"Resolved companies confirmed by 2+ independent keys (distinct values)","num":4,"den":8,"rate":0.5},{"o":12,"area":"external","metric":"Resolved companies whose name also agrees (audit proxy)","num":6,"den":8,"rate":0.75},{"o":13,"area":"external","metric":"External companies in conflict (keys disagree)","num":1,"den":11,"rate":0.0909},{"o":14,"area":"external","metric":"External companies left unresolved (any reason)","num":3,"den":11,"rate":0.2727},{"o":15,"area":"external","metric":"External signals attached to an account","num":14,"den":19,"rate":0.7368},{"o":16,"area":"external","metric":"News headlines that name a different company (entity mismatch)","num":1,"den":10,"rate":0.1},{"o":17,"area":"crm","metric":"Salesforce accounts with no domain and no LinkedIn","num":1,"den":10,"rate":0.1},{"o":18,"area":"crm","metric":"Salesforce accounts sharing a domain with another account","num":2,"den":10,"rate":0.2},{"o":19,"area":"external","metric":"Resolved companies whose name points at a different account (held for review)","num":1,"den":8,"rate":0.125}],"prospects":[{"id":"external:sc10","src":"external_signal","name":"Prospect AI","dom":"prospect-ai.com","plan":"—","members":0,"sig":3,"why":"External activity from a company with no CRM account","head":"Prospect AI raises seed round"},{"id":"product:org_nomap","src":"product_signup","name":"Startup Sandbox","dom":"startup.dev","plan":"free","members":1,"sig":1,"why":"Product sign-up using us today with no CRM account","head":"—"}],"traces":[{"org":"org_acme","days":7,"gb7":299.6,"first":40.0,"last":44.9,"growth":0.1225},{"org":"org_globex","days":7,"gb7":103.6,"first":12.0,"last":16.9,"growth":0.4083},{"org":"org_initech","days":7,"gb7":40.6,"first":3.0,"last":7.9,"growth":1.6333},{"org":"org_umbrella","days":7,"gb7":30.1,"first":1.5,"last":6.4,"growth":3.2667}],"keys":[{"type":"account","id":"ACC001","name":"Acme Corp","dom":"acme.com","slug":"acme-corp","key":"acme","tok":"acme","shared":false},{"type":"account","id":"ACC002","name":"Globex","dom":"—","slug":"globex-industries","key":"globex","tok":"globex","shared":false},{"type":"account","id":"ACC003","name":"Initech","dom":"initech.com","slug":"—","key":"initech","tok":"initech","shared":false},{"type":"account","id":"ACC004","name":"Umbrella Labs","dom":"umbrella.co","slug":"umbrella-labs","key":"umbrellalabs","tok":"umbrella","shared":false},{"type":"account","id":"ACC005","name":"Soylent Corp","dom":"soylent.com","slug":"—","key":"soylent","tok":"soylent","shared":false},{"type":"account","id":"ACC006","name":"Hooli","dom":"hooli.com","slug":"hooli","key":"hooli","tok":"hooli","shared":true},{"type":"account","id":"ACC007","name":"Hooli XYZ","dom":"hooli.com","slug":"hooli-xyz","key":"hoolixyz","tok":"hooli","shared":true},{"type":"account","id":"ACC008","name":"Stark Industries","dom":"—","slug":"—","key":"starkindustries","tok":"stark","shared":false},{"type":"account","id":"ACC009","name":"Wayne Enterprises","dom":"wayne.com","slug":"wayne-ent","key":"wayneenterprises","tok":"wayne","shared":false},{"type":"account","id":"ACC010","name":"Pied Piper","dom":"piedpiper.com","slug":"pied-piper","key":"piedpiper","tok":"pied","shared":false},{"type":"company","id":"sc01","name":"Acme Corporation","dom":"acme.com","slug":"acme-corp","key":"acme","tok":"acme","shared":true},{"type":"company","id":"sc02","name":"Globex","dom":"globex.io","slug":"globex-industries","key":"globex","tok":"globex","shared":false},{"type":"company","id":"sc03","name":"Initech LLC","dom":"initech.com","slug":"initech-software","key":"initech","tok":"initech","shared":false},{"type":"company","id":"sc04","name":"Umbrella","dom":"umbrella.co","slug":"umbrella-labs","key":"umbrella","tok":"umbrella","shared":false},{"type":"company","id":"sc05","name":"Hooli Inc","dom":"hooli.com","slug":"hooli-xyz","key":"hooli","tok":"hooli","shared":true},{"type":"company","id":"sc06","name":"Hooli","dom":"hooli.com","slug":"hooli","key":"hooli","tok":"hooli","shared":true},{"type":"company","id":"sc07","name":"Stark Industries","dom":"—","slug":"—","key":"starkindustries","tok":"stark","shared":false},{"type":"company","id":"sc08","name":"Wayne Enterprises Inc.","dom":"wayne-enterprises.com","slug":"wayne-ent","key":"wayneenterprises","tok":"wayne","shared":false},{"type":"company","id":"sc09","name":"PiedPiper","dom":"piedpiper.com","slug":"pied-piper","key":"piedpiper","tok":"piedpiper","shared":false},{"type":"company","id":"sc10","name":"Prospect AI","dom":"prospect-ai.com","slug":"prospect-ai","key":"prospectai","tok":"prospect","shared":false},{"type":"company","id":"sc11","name":"Acme (dup record)","dom":"acme.com","slug":"pied-piper","key":"acmeduprecord","tok":"acme","shared":true}]}};
 /* ==REPORTDATA:END== */
 
 /* ==LINEAGE:BEGIN — generated by docs/build_lineage.py, do not edit== */
 /* dbt v1.12.4 · manifest schema v12.json · 59 nodes, 101 edges */
-var BUILD = {gen:"2026-09-14 06:31 UTC", dbt:"1.12.4", nodes:59, edges:101, delivered:18, introduced:41, source:21, raw:18, cleansed:12, unified:8};
+var BUILD = {gen:"2026-09-14 07:01 UTC", dbt:"1.12.4", nodes:59, edges:101, delivered:18, introduced:41, source:21, raw:18, cleansed:12, unified:8};
 var N = [
   {id:"raw_api_keys", col:"source", grp:"Product · delivered", neu:0, grain:"one per key", desc:"Hash only, plus a free-text name. Objects do not record which key made them."},
   {id:"raw_cli_wizard", col:"source", grp:"Product · delivered", neu:0, grain:"wizard view", desc:"Fires in the BROWSER, not the CLI. Intent, never usage."},
@@ -1575,7 +1539,7 @@ var MODELNOTE = {
   int_memberships:["person × org","Collapses duplicate logins into one membership and carries the org's resolution.","10 membership rows from 11 raw ones, after Grace's two logins merge inside <code>org_acme</code>."],
   int_api_keys:["one per key","Whose key it is, plus name hints that stay hints.","6 keys. <code>dave-cli</code> reads as CLI intent and <code>ci-service</code> as automation. Neither ever becomes proof of usage."],
   int_account_trace_trend:["one per account","Owns the definition of trace growth so three marts stop recomputing it.","4 accounts. The same numbers as before the refactor, now from one place instead of three."],
-  int_signal_company_match_candidates:["company × method × account","Every possible link. It refuses to choose.","25 candidate links across 4 methods, including the shared and contradicting ones that get rejected later."],
+  int_signal_company_match_candidates:["company × method × account","Every possible link. It refuses to choose.","Four methods are tried independently. The count in the Rows column includes the shared and contradicting links that get rejected in the next model."],
   int_member_account_resolution:["one per person","One account per person, only if all their orgs agree.","6 of 8 people resolve. Frank is ambiguous across two accounts; Heidi's only org is unmapped."],
   int_signal_company_resolution:["one per company","The account, by precedence, and only if every other key agrees.","8 of 11 resolved with 1 of those held for review, 1 conflict, 1 with no identifiers, 1 genuinely net-new."],
   int_product_activity:["one per activity","Surface, usage or intent, attribution, confidence and human or automation, for every event.","44 activities, 42 attributed to an account. The 2 unattributed belong to a person who spans two accounts."],
@@ -1627,12 +1591,12 @@ var MODELNOTE = {
 /* ── surfaces ───────────────────────────────────────────────────────────── */
 (function(){
   var A = DATA.a, tot = A.objects.reduce(function(a, o){ return a + o.n; }, 0);
-  var fill = {"sdk|deterministic":"linear-gradient(90deg,var(--raw),var(--clean))",
-              "sdk|heuristic":"rgba(255,165,31,.5)", "unknown|none":"rgba(140,147,161,.28)"};
+  var fill = {"sdk|deterministic":"var(--clean)",
+              "sdk|heuristic":"rgba(240,162,46,.42)", "unknown|none":"var(--s3)"};
   $("#objbar").innerHTML = '<div class="stackbar">' + A.objects.map(function(o){
     var k = o.surface + "|" + o.attr;
     return '<span style="width:' + (o.n / tot * 100) + "%;background:" + (fill[k] || "rgba(255,255,255,.1)")
-      + ";color:" + (o.attr === "none" ? "var(--ink)" : "#150F04") + '">' + o.n + "</span>";
+      + ";color:" + (o.attr === "none" ? "var(--ink-2)" : "#0A0803") + '">' + o.n + "</span>";
   }).join("") + "</div>" + A.objects.map(function(o){
     return '<div style="display:flex;gap:9px;align-items:baseline;font-size:13px;padding:3px 0">'
       + tag(o.attr === "deterministic" ? "t-ok" : o.attr === "heuristic" ? "t-warn" : "t-dim", o.surface + " · " + o.attr)
@@ -1734,6 +1698,18 @@ var CONOTE = {
         + '<span class="o"><span class="dim">→ ' + esc(acct) + "</span> "
         + tag(good ? "t-ok" : "t-warn", good ? "agrees" : "points elsewhere") + "</span></div>";
     }).join("");
+    // the name never decides, but when it points somewhere it is evidence the
+    // reader should see rather than take on trust from the prose below
+    if(c.nameacct){
+      // "contradicts" only means something when a key actually decided. For an
+      // unresolved company the name is simply the reason a steward gets it.
+      var resolved = c.status === "resolved";
+      var lbl = !resolved ? ["t-warn", "suggestion for a steward"]
+              : c.nameacct === c.acct ? ["t-dim", "agrees, but never decides"]
+              : ["t-stop", "contradicts, −0.20"];
+      ev += '<div class="krow"><span class="m">company_name</span><span class="v">' + esc(c.namekey) + "</span>"
+          + '<span class="o"><span class="dim">→ ' + esc(c.nameacct) + "</span> " + tag(lbl[0], lbl[1]) + "</span></div>";
+    }
     body.innerHTML = '<div class="lp-h"><h4>' + c.id + " · " + esc(c.name) + "</h4>"
       + statusTag(c.status) + statusTag(c.action) + "</div>"
       + '<div style="font:600 10px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);margin:14px 0 4px">Keys that matched, and what each pointed at</div>'
@@ -1753,8 +1729,8 @@ var CONOTE = {
   $("#keytab").innerHTML = A.keys.map(function(k){
     return "<tr><td>" + tag(k.type === "account" ? "t-clean" : "t-uni", k.type) + "</td>"
       + '<td class="mono"><b>' + k.id + "</b></td><td>" + esc(k.name) + "</td>"
-      + '<td class="mono" style="color:var(--hot)">' + k.dom + '</td>'
-      + '<td class="mono" style="color:var(--hot)">' + k.slug + "</td>"
+      + '<td class="mono" style="color:var(--ink)">' + k.dom + '</td>'
+      + '<td class="mono" style="color:var(--ink)">' + k.slug + "</td>"
       + '<td class="mono dim">' + k.key + '</td><td class="mono dim">' + k.tok + "</td>"
       + "<td>" + (k.shared ? tag("t-warn", "domain shared") : "") + "</td></tr>";
   }).join("");
@@ -1897,7 +1873,7 @@ function draw(){
       + '" opacity="' + (ambient ? 0.17 : strong ? 0.95 : 0.42) + '" stroke-linecap="round"/>';
   });
   svg.innerHTML = '<defs><linearGradient id="eg" x1="0" y1="0" x2="1" y2="0">'
-    + '<stop offset="0%" stop-color="#FF7A18"/><stop offset="100%" stop-color="#FFD34E"/></linearGradient></defs>' + frag;
+    + '<stop offset="0%" stop-color="#E2762A"/><stop offset="100%" stop-color="#F3C64A"/></linearGradient></defs>' + frag;
 }
 function listOf(ids){
   return (!ids || !ids.length) ? '<span class="dim">—</span>'
@@ -1983,6 +1959,17 @@ document.querySelectorAll(".copy").forEach(function(b){
     }).catch(function(){ b.textContent = "Select manually"; });
   });
 });
+(function(){
+  var bar = document.getElementById("prog"), t = null;
+  function tick(){
+    var h = document.documentElement;
+    var max = h.scrollHeight - h.clientHeight;
+    bar.style.width = (max > 0 ? (h.scrollTop / max) * 100 : 0) + "%";
+    t = null;
+  }
+  addEventListener("scroll", function(){ if(!t) t = requestAnimationFrame(tick); }, {passive:true});
+  tick();
+})();
 (function(){
   var links = [].slice.call(document.querySelectorAll("#nav a"));
   var secs = links.map(function(a){ return document.querySelector(a.getAttribute("href")); });

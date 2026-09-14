@@ -13,6 +13,11 @@ number in the doc looks wrong, this is the only place it could have come from.
     python docs/build_report_data.py
 
 Rewrites the block between the REPORTDATA markers in docs/overview.html.
+
+One rule for the prose that sits alongside this data (MODELNOTE in the page):
+never restate a number this script already generates. A hand-written "25
+candidate links" next to a generated "34" is exactly the drift the generators
+exist to prevent. Describe the shape; let the generated column carry the count.
 """
 from __future__ import annotations
 
@@ -127,12 +132,16 @@ def main() -> int:
         "companies": [
             {"id": r[0], "name": r[1], "status": r[2], "acct": r[3], "method": r[4],
              "conf": r[5], "review": r[6], "action": r[7], "km": r[8], "ka": r[9], "uk": r[10],
-             "ev": r[11] or "—"}
+             "ev": r[11] or "—", "nameacct": r[12], "namekey": r[13]}
             for r in rows("""select company_id, company_name, resolution_status, coalesce(account_id,'—'),
                                     coalesce(match_method,'—'), coalesce(cast(match_confidence as varchar),'—'),
                                     needs_review, next_action, keys_matched, keys_agreeing,
-                                    unique_keys_agreeing, match_evidence
-                             from cleansed.int_signal_company_resolution order by company_id""")
+                                    unique_keys_agreeing, match_evidence,
+                                    name_match_account_id, name_key
+                             from cleansed.int_signal_company_resolution r
+                             join (select entity_id, name_key from cleansed.int_match_keys
+                                   where entity_type = 'company') k on k.entity_id = r.company_id
+                             order by company_id""")
         ],
         "members": [
             {"p": r[0], "email": r[1], "acct": r[2], "type": r[3], "ui": r[4], "sdk": r[5],
