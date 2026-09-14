@@ -13,6 +13,17 @@ target-path: "target"
 clean-targets: ["target", "dbt_packages", "logs"]
 
 # ---------------------------------------------------------------------------
+# Flags
+# ---------------------------------------------------------------------------
+flags:
+  # dbt's partial-parse cache records ABSOLUTE paths. The same project run from
+  # a local venv and from the Docker image (mounted at /app) then poisons each
+  # other's cache and every seed fails with "No files found that match the
+  # pattern ...". This project has 227 nodes and parses in well under a second,
+  # so the cache buys nothing and costs a genuinely confusing failure mode.
+  partial_parse: false
+
+# ---------------------------------------------------------------------------
 # Project-wide knobs
 # ---------------------------------------------------------------------------
 vars:

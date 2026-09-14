@@ -1,0 +1,10 @@
+# Everything needed to build the project and regenerate the docs.
+# Pinned loosely on purpose: this is a take-home, not a production lockfile.
+
+dbt-core>=1.10,<2          # the transformation framework
+dbt-duckdb>=1.9            # the default target: a local file, no warehouse needed
+duckdb>=1.0                # docs/build_report_data.py reads the built file back
+markdown>=3.5              # docs/build_memo_pdf.py renders MEMO.md
+
+# For Snowflake instead of DuckDB:
+#   pip install "dbt-snowflake>=1.9"

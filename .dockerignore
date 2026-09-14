@@ -1,0 +1,13 @@
+.git
+.venv
+venv
+target
+logs
+dbt_packages
+*.duckdb
+*.duckdb.wal
+.user.yml
+.DS_Store
+.playwright-mcp
+__pycache__
+*.pyc

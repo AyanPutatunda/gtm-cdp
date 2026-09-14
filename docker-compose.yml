@@ -1,0 +1,20 @@
+# docker compose run --rm dbt              # full build (the default command)
+# docker compose run --rm dbt dbt test     # or any other dbt command
+# docker compose run --rm dbt bash         # a shell inside the image
+#
+# The bind mount means edits on your machine are picked up immediately and the
+# built gtm_cdp.duckdb lands back in the project directory.
+services:
+  dbt:
+    build: .
+    image: gtm-cdp
+    working_dir: /app
+    environment:
+      DBT_PROFILES_DIR: /app
+      # Uncomment to run against Snowflake instead of the local DuckDB file:
+      # SNOWFLAKE_ACCOUNT: ${SNOWFLAKE_ACCOUNT}
+      # SNOWFLAKE_USER: ${SNOWFLAKE_USER}
+      # SNOWFLAKE_PASSWORD: ${SNOWFLAKE_PASSWORD}
+    volumes:
+      - .:/app
+    command: dbt build

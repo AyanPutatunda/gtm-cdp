@@ -1,12 +1,12 @@
-# GTM Intelligence Platform — a lightweight CDP in dbt
+# GTM Intelligence Platform
 
-This project joins three worlds (product usage, Salesforce, and a third-party company-intelligence feed) into one account-level view a rep can act on.
+A lightweight customer data platform built on dbt. It takes product usage, Salesforce and a third-party company feed — three systems with no key in common — and resolves them into one account-level view a sales rep can work from.
 
-I built the whole thing around one line from the brief:
+**Full write-up:** [`docs/overview.html`](docs/overview.html) is the project report: the problem, the data provided, the exploratory analysis, model-by-model results, and the memo. Open it in a browser. Its DAG is generated from dbt's own manifest and every number in it is read back out of the built warehouse.
 
-> **An unresolved mapping is better than a bad merge.**
+**Run it:** `docker run --rm -v "$PWD:/app" gtm-cdp` after `docker build -t gtm-cdp .`, or `make setup && make build` in a virtualenv. Either way you should see `PASS=223 WARN=4 ERROR=0`. Details in [Running it](#running-it).
 
-In practice that means every resolved link carries its source and a confidence, conflicts raise a flag, and nothing gets guessed.
+The brief set the constraint that shaped every design decision here: favour an unresolved mapping over a bad merge, carry a source and a confidence on every resolved mapping, and set a flag on conflicts rather than guessing. Nothing in this project merges on a similarity score, and where evidence disagrees the record goes to a review queue with the reason attached.
 
 ---
 
@@ -24,43 +24,104 @@ In practice that means every resolved link carries its source and a confidence, 
 | **C** · a unified view reps can act on, built to extend | `fct_account_signals` puts every source in one shape (a new source is one `union` branch); `account_360` is the rep view built on top, carrying `adoption_in_plain_english` so the caveats travel with the numbers. |
 | **D** · tests you'd actually run | 168 of them — 166 data tests plus 2 unit tests — see [Tests](#tests-youd-actually-run). The interesting ones assert *principles*, not just shapes; the unit tests pin behaviour the seeds can't reach. |
 | **D** · the memo | [MEMO.md](MEMO.md) (and `MEMO.pdf`), answering all six questions in order. |
+| **Write-up** · the whole thing as a report | [`docs/overview.html`](docs/overview.html) — problem, data provided, exploratory analysis, model-by-model results, and the memo. Its DAG is generated from dbt's manifest and every number in it is read back out of the built warehouse. |
 | **Deliverable** · runnable, `dbt build` passes | See below. 223 pass, 4 intentional warnings, 0 errors. |
 | **Deliverable** · data issues found | [Data issues found](#data-issues-found) — 15 of them. |
 | **Deliverable** · time spent, where I'd invest more | [Time spent](#time-spent-and-where-id-invest-more). |
 
 ---
 
-## Run it in two minutes
+## Running it
 
-You need Python 3.9 or newer. The default target is a local DuckDB file, so there's no warehouse to set up.
+Three ways in, all producing the same thing. Pick whichever you already have installed.
 
-```bash
-cd gtm_cdp
-python -m venv .venv && source .venv/bin/activate
-pip install "dbt-core>=1.10,<2" "dbt-duckdb>=1.9"
+| | You need | Best for |
+|---|---|---|
+| **A · Docker** | Docker only | Nothing to install, guaranteed-clean environment |
+| **B · venv** | Python 3.9–3.13 | Iterating on the models, `dbt show`, `dbt docs serve` |
+| **C · Snowflake** | credentials | Running the same code against a real warehouse |
 
-export DBT_PROFILES_DIR=.        # profiles.yml ships with the project
-dbt build                        # seeds -> models -> tests, in dependency order
-```
-
-You should see:
+Whichever you use, the expected output is:
 
 ```
 Done. PASS=223 WARN=4 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=227
 ```
 
-The four warnings are meant to be there. They're data-quality alerts for problems in the seeds (listed under *Data issues found*). I made them warn rather than fail so the pipeline still runs, but the problem shows up in every run instead of being forgotten.
+The four warnings are meant to be there. They are data-quality alerts for problems in the seeds (listed under *Data issues found*). I made them warn rather than fail so the pipeline still completes, but the problem shows up in every run instead of being forgotten.
 
-To look at the results:
+---
+
+### A · Docker
+
+No Python, no dbt, no warehouse. The image pins Python 3.12 because dbt does not support 3.14 yet.
+
+```bash
+docker build -t gtm-cdp .
+docker run --rm -v "$PWD:/app" gtm-cdp
+```
+
+That is the whole thing. The bind mount is what puts `gtm_cdp.duckdb`, `target/` and `logs/` back on your machine; drop it and you get a throwaway container that just proves the build is green.
+
+With Compose, which sets the mount and `DBT_PROFILES_DIR` for you:
+
+```bash
+docker compose run --rm dbt                              # full build (default command)
+docker compose run --rm dbt dbt test                     # tests only
+docker compose run --rm dbt dbt show -s account_360 --limit 10
+docker compose run --rm dbt python docs/build_lineage.py # regenerate the design doc's DAG
+docker compose run --rm dbt bash                         # poke around inside
+```
+
+Two notes. On Linux, files written through the bind mount are owned by root — add `--user "$(id -u):$(id -g)"` if that matters to you; on macOS and Windows Docker Desktop maps ownership for you. And partial parsing is switched off in `dbt_project.yml` on purpose: dbt's parse cache stores absolute paths, so without that flag a container run and a venv run over the same directory poison each other's cache and every seed fails with a confusing `No files found that match the pattern /Users/...`. This project parses in well under a second, so the cache buys nothing.
+
+### B · Local virtualenv
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+export DBT_PROFILES_DIR=.        # profiles.yml ships with the project
+dbt build                        # seeds -> models -> tests, in dependency order
+```
+
+One trap worth naming: **dbt does not support Python 3.14 yet**, and Homebrew's `python3` is already on it. If `pip install` fails, point the venv at 3.12 or 3.13 explicitly — `python3.12 -m venv .venv`, or `uv venv --python 3.12 .venv` if you have `uv`. The Dockerfile pins 3.12 for the same reason.
+
+`requirements.txt` pulls `dbt-core`, `dbt-duckdb`, plus `duckdb` and `markdown` for the two doc generators. The default target is a **local DuckDB file** written to `gtm_cdp.duckdb` in the project root, so there is no warehouse to set up and no credentials to supply.
+
+There is a `Makefile` if you prefer:
+
+```bash
+make setup      # create .venv and install requirements.txt
+make build      # dbt build
+make test       # dbt test
+make docs       # rebuild, then regenerate docs/overview.html from the manifest + warehouse
+make docker     # build the image and run dbt inside it
+make clean      # remove target/, logs/ and the .duckdb file
+make help       # list all targets
+```
+
+### Looking at the results
 
 ```bash
 dbt show -s account_360 --limit 10
 dbt show --inline "select account_name, priority_rank, action_reasons from {{ ref('account_360') }} order by priority_rank"
-dbt docs generate && dbt docs serve      # lineage graph + column docs
-# (or open gtm_cdp.duckdb in any DuckDB client: schemas raw / cleansed / unified)
+dbt docs generate && dbt docs serve      # dbt's own lineage graph + column docs
+open docs/overview.html                  # the project report, with the DAG and every result
 ```
 
-### On Snowflake
+Or open `gtm_cdp.duckdb` in any DuckDB client — the schemas are `raw`, `cleansed` and `unified`:
+
+```bash
+pip install duckdb
+python -c "import duckdb; duckdb.connect('gtm_cdp.duckdb').sql('select account_name, priority_rank, action_reasons from unified.account_360 order by priority_rank').show(max_width=200)"
+```
+
+```bash
+# or the DuckDB CLI, if you have it
+duckdb gtm_cdp.duckdb -c "select * from unified.rpt_resolution_quality order by metric_order"
+```
+
+### C · On Snowflake
 
 The same code runs on Snowflake. `macros/cross_db.sql` holds three shims for the syntax that genuinely differs (JSON extraction, list aggregation, one keyword column name) plus two helpers for the as-of date. Everything else is plain SQL.
 
@@ -72,9 +133,20 @@ dbt build --target snowflake     # dev: writes DEV_RAW / DEV_CLEANSED / DEV_UNIF
 dbt build --target prod          # prod: writes RAW / CLEANSED / UNIFIED
 ```
 
-Dev targets get a schema prefix on purpose (see `macros/generate_schema_name.sql`), so a dev run can't overwrite production. To use today's date instead of the frozen snapshot, pass `--vars '{as_of_date: today}'`.
+Dev targets get a schema prefix on purpose (see `macros/generate_schema_name.sql`), so a dev run cannot overwrite production. To use today's date instead of the frozen snapshot, pass `--vars '{as_of_date: today}'`.
 
-> One caveat: `dbt build` passes end to end on DuckDB (verified on dbt-core 1.12.4 / dbt-duckdb 1.11.0), and for Snowflake the project compiles and every compiled file passes a Snowflake-dialect syntax check. I did not have a live Snowflake account to run it against.
+> One caveat, stated plainly: `dbt build` passes end to end on DuckDB — verified on dbt-core 1.12.4 with dbt-duckdb 1.11.0, both in a venv and in the Docker image. For Snowflake the project compiles and every compiled file passes a Snowflake-dialect syntax check, but I had no live Snowflake account to run it against.
+
+### Regenerating the report
+
+`docs/overview.html` is the project write-up: problem, data, exploratory analysis, model-by-model results, and the memo. Its DAG comes from dbt's manifest and every number in it is read back out of the built warehouse, so after any change:
+
+```bash
+dbt build
+python docs/build_lineage.py       # nodes, layers, passes and edges from target/manifest.json
+python docs/build_report_data.py   # every figure, from gtm_cdp.duckdb
+python docs/build_memo_pdf.py      # MEMO.md -> MEMO.pdf (needs Chrome installed)
+```
 
 ---
 
@@ -501,8 +573,12 @@ Being precise about the limit: adding a whole new **surface** (a fifth one) also
 
 ```
 gtm_cdp/
-├── dbt_project.yml          layers, materializations, vars (as_of_date, thresholds)
+├── dbt_project.yml          layers, materializations, flags, vars (as_of_date, thresholds)
 ├── profiles.yml             dev = DuckDB, snowflake / prod = env vars
+├── requirements.txt         dbt-core, dbt-duckdb, duckdb, markdown
+├── Dockerfile               python:3.12-slim + requirements; `docker run` gives a green build
+├── docker-compose.yml       the same, with the bind mount and DBT_PROFILES_DIR set
+├── Makefile                 setup / build / test / docs / memo / docker / clean
 ├── seeds/                   ALL 21 inputs are dbt seeds
 │   ├── raw/                   the 18 delivered CSVs, untouched (+ the original SEEDS_README.md)
 │   ├── reference/             3 ref_* CSVs: the rules as data
@@ -513,8 +589,9 @@ gtm_cdp/
 ├── models/unified/          8 views, incl. account_360
 ├── tests/                   4 generic + 6 singular tests
 ├── analyses/                eda_seed_profile.sql, what_can_we_say_about_cli.sql
-├── docs/overview.html       the end-to-end design doc (open it in a browser)
-├── docs/build_lineage.py    regenerates that doc's DAG from target/manifest.json
+├── docs/overview.html       the project report — open it in a browser
+├── docs/build_lineage.py    regenerates that report's DAG from target/manifest.json
+├── docs/build_report_data.py regenerates every figure in it from gtm_cdp.duckdb
 ├── docs/build_memo_pdf.py   renders MEMO.md -> MEMO.pdf, so the two can't disagree
 ├── docs/sources.production.yml   the exact diff to swap seeds for landed tables
 ├── MEMO.md
