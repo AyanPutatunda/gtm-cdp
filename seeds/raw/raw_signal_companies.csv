@@ -1,0 +1,12 @@
+company_id,company_name,company_website,linkedin_url,linkedin_domain
+sc01,Acme Corporation,https://www.acme.com/,https://www.linkedin.com/company/acme-corp,acme.com
+sc02,Globex,http://globex.io/products,https://www.linkedin.com/company/globex-industries,
+sc03,Initech LLC,https://Initech.com,https://www.linkedin.com/company/initech-software,initech.com
+sc04,Umbrella,https://umbrella.co/,https://linkedin.com/company/umbrella-labs,umbrella.co
+sc05,Hooli Inc,https://www.hooli.com,https://www.linkedin.com/company/hooli-xyz,hooli.com
+sc06,Hooli,https://hooli.com,https://www.linkedin.com/company/hooli,hooli.com
+sc07,Stark Industries,,,
+sc08,Wayne Enterprises Inc.,https://wayne-enterprises.com,https://www.linkedin.com/company/wayne-ent,wayne.com
+sc09,PiedPiper,https://piedpiper.com/?utm_source=news,https://www.linkedin.com/company/pied-piper/,piedpiper.com
+sc10,Prospect AI,https://prospect-ai.com,https://www.linkedin.com/company/prospect-ai,prospect-ai.com
+sc11,Acme (dup record),https://acme.com,https://www.linkedin.com/company/pied-piper,

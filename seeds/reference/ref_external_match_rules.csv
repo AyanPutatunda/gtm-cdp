@@ -1,0 +1,5 @@
+match_method,precedence,base_confidence,can_resolve,rationale
+linkedin_slug,1,0.90,true,"A LinkedIn company page is one legal entity; subsidiaries get their own page, so it separates Hooli from Hooli XYZ"
+website_domain,2,0.85,true,"The company's own website host; strong, but parents and subsidiaries often share one domain"
+linkedin_domain,3,0.75,true,"The website listed on the LinkedIn page; self-reported and one step removed"
+company_name,99,0.00,false,"Names collide and vary; used only to suggest a match for human review, never to merge"

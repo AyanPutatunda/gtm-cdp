@@ -1,0 +1,12 @@
+org_id,user_id,member_created_at
+org_acme,u_alice,2025-11-01 10:05:00
+org_acme,u_bob,2025-11-02 09:00:00
+org_acme,u_grace,2026-01-20 08:00:00
+org_acme,u_grace_dup,2026-06-02 08:00:00
+org_acme_eu,u_alice,2026-01-15 10:05:00
+org_globex,u_carol,2026-02-01 11:00:00
+org_globex,u_dave,2026-02-03 12:00:00
+org_globex,u_frank,2026-04-02 09:00:00
+org_umbrella,u_frank,2026-04-01 12:00:00
+org_initech,u_erin,2026-03-10 12:00:00
+org_nomap,u_heidi,2026-05-01 12:00:00

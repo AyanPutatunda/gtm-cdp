@@ -1,0 +1,11 @@
+anonymous_id,user_id,timestamp,path
+anon_a1,u_alice,2026-07-15 09:00:00,/experiments
+anon_a1,u_alice,2026-07-17 10:00:00,/datasets
+anon_a1,u_alice,2026-07-18 11:30:00,/playground
+anon_c1,u_carol,2026-07-16 13:00:00,/experiments
+anon_c1,u_carol,2026-07-17 14:00:00,/playground
+anon_e1,u_erin,2026-07-18 15:00:00,/projects
+anon_e1,u_erin,2026-07-18 15:10:00,/experiments
+anon_d1,u_dave,2026-07-15 08:00:00,/settings/api-keys
+anon_x9,,2026-07-16 07:00:00,/
+anon_x9,,2026-07-16 07:01:00,/pricing

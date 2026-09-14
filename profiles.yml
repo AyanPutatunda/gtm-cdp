@@ -1,0 +1,37 @@
+# Three targets, same code.
+#   dev        -> local DuckDB file (zero setup, runs anywhere)   : dbt build
+#   snowflake  -> your Snowflake account, dev schemas DEV_RAW/...  : dbt build --target snowflake
+#   prod       -> same account, schemas RAW / CLEANSED / UNIFIED   : dbt build --target prod
+gtm_cdp:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "gtm_cdp.duckdb"
+      threads: 4
+
+    snowflake:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      password: "{{ env_var('SNOWFLAKE_PASSWORD', '') }}"
+      authenticator: "{{ env_var('SNOWFLAKE_AUTHENTICATOR', 'snowflake') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE', 'TRANSFORMER') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'TRANSFORMING') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE', 'GTM_CDP') }}"
+      schema: "{{ env_var('SNOWFLAKE_SCHEMA', 'DEV') }}"
+      threads: 8
+
+    # Same account, production schemas: RAW / CLEANSED / UNIFIED (no prefix).
+    prod:
+      type: snowflake
+      account: "{{ env_var('SNOWFLAKE_ACCOUNT') }}"
+      user: "{{ env_var('SNOWFLAKE_USER') }}"
+      password: "{{ env_var('SNOWFLAKE_PASSWORD', '') }}"
+      authenticator: "{{ env_var('SNOWFLAKE_AUTHENTICATOR', 'snowflake') }}"
+      role: "{{ env_var('SNOWFLAKE_ROLE', 'TRANSFORMER') }}"
+      warehouse: "{{ env_var('SNOWFLAKE_WAREHOUSE', 'TRANSFORMING') }}"
+      database: "{{ env_var('SNOWFLAKE_DATABASE', 'GTM_CDP') }}"
+      schema: "{{ env_var('SNOWFLAKE_SCHEMA', 'PROD') }}"
+      threads: 8
+

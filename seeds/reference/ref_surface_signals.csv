@@ -1,0 +1,10 @@
+signal_code,surface,evidence_kind,attribution,confidence_score,source_columns,what_it_proves,what_it_cannot_prove
+ui_page_view,ui,usage,deterministic,0.95,"raw_segment_pages.user_id, path","A logged-in person loaded a page of the web app","Which org they were working in; whether a page view created anything"
+code_repo_info,sdk,usage,deterministic,0.90,"raw_experiments.repo_info","The object was logged from code running inside a git repo, i.e. through the SDK","Whether the SDK was called directly or via the CLI (the CLI eval runner wraps the SDK)"
+code_ci_run,sdk,usage,deterministic,0.90,"raw_experiments.metadata.ci_run_id / ci / source, repo_info.author_name, raw_datasets.metadata.source","The object came from an automated CI job through the SDK","Which human set it up; the user_id is just the owner of the key CI used"
+code_runtime_source,sdk,usage,heuristic,0.60,"raw_experiments.metadata.source (e.g. lambda-prod)","A server-side process tagged its own source, which only code can do","That the tag is standardised; it is free text written by the customer"
+object_origin_unknown,unknown,usage,none,0.00,"raw_experiments / raw_datasets / raw_prompts with no repo_info and no source tag","A person or key created something in this project","Whether it was made in the UI or by the SDK outside a git repo"
+cli_setup_wizard,cli,intent,heuristic,0.30,"raw_cli_wizard.user_id","The person opened the CLI setup wizard in the browser","That the CLI was ever installed or run"
+cli_key_name_hint,cli,intent,heuristic,0.20,"raw_api_keys.name contains 'cli'","The person named an API key after the CLI","Anything; key names are free text"
+mcp_docs_click,mcp,intent,heuristic,0.30,"raw_docs_mcp_events.action","The person copied or clicked the MCP install command in the docs","That an MCP client ever connected or made a call"
+org_trace_ingestion,sdk,usage,deterministic,0.85,"raw_trace_volume.ingested_gb (org x day)","The org is sending production traces programmatically","Which member, key or surface sent them; there is no user_id"

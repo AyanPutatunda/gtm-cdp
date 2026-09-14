@@ -1,0 +1,3 @@
+user_id,timestamp,action
+u_alice,2026-07-10 10:00:00,copy_add_mcp_command
+u_carol,2026-07-12 11:00:00,install_mcp_server

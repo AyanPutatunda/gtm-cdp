@@ -1,0 +1,1592 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GTM Intelligence Platform — design doc</title>
+<meta name="description" content="A lightweight CDP in dbt: how 18 delivered CSVs become an account-level view sales can act on, and every object introduced along the way.">
+<style>
+/* ─────────────────────────────────────────────────────────────────────────
+   Tokens
+   ───────────────────────────────────────────────────────────────────────── */
+:root{
+  color-scheme: light;
+  --bg:#FBFBFA;        --bg-2:#FFFFFF;      --bg-3:#F4F4F2;
+  --ink:#16181D;       --ink-2:#4A4F5A;     --ink-3:#7A818E;
+  --line:#E4E4E0;      --line-2:#D2D3CE;
+  --seed:#7C7A72;      --seed-bg:#F0EFEA;
+  --raw:#0B6E63;       --raw-bg:#E3F1EE;
+  --clean:#1F4FD8;     --clean-bg:#E6ECFD;
+  --unified:#6B2FBF;   --unified-bg:#EFE7FB;
+  --new:#9A5B00;       --new-bg:#FBEEDC;
+  --ok:#15704E;        --ok-bg:#E2F1EA;
+  --warn:#8A5A00;      --warn-bg:#FAEEDA;
+  --stop:#A32B22;      --stop-bg:#FAE7E5;
+  --code-bg:#15171C;   --code-ink:#E8EAEE;  --code-dim:#8B93A3;
+  --shadow:0 1px 2px rgba(16,18,24,.05), 0 8px 24px -16px rgba(16,18,24,.28);
+  --shadow-lg:0 2px 4px rgba(16,18,24,.05), 0 24px 60px -28px rgba(16,18,24,.4);
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --serif:ui-serif,Georgia,"Iowan Old Style","Times New Roman",serif;
+  --r:10px;
+}
+:root:not([data-theme="light"]) { }
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --bg:#0D0F13;      --bg-2:#14171D;      --bg-3:#1A1E25;
+    --ink:#ECEEF2;     --ink-2:#A9B0BC;     --ink-3:#79808D;
+    --line:#242932;    --line-2:#333944;
+    --seed:#A7A49A;    --seed-bg:#22242A;
+    --raw:#4FC2B2;     --raw-bg:#0F2925;
+    --clean:#7AA2FF;   --clean-bg:#141E36;
+    --unified:#B892F6; --unified-bg:#20172F;
+    --new:#E0A455;     --new-bg:#2B2113;
+    --ok:#5CC79A;      --ok-bg:#0F2620;
+    --warn:#E0A455;    --warn-bg:#2B2113;
+    --stop:#F08379;    --stop-bg:#2E1715;
+    --code-bg:#090B0E; --code-ink:#E8EAEE;  --code-dim:#727A88;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+    --shadow-lg:0 2px 4px rgba(0,0,0,.4), 0 24px 60px -28px rgba(0,0,0,.9);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --bg:#0D0F13;      --bg-2:#14171D;      --bg-3:#1A1E25;
+  --ink:#ECEEF2;     --ink-2:#A9B0BC;     --ink-3:#79808D;
+  --line:#242932;    --line-2:#333944;
+  --seed:#A7A49A;    --seed-bg:#22242A;
+  --raw:#4FC2B2;     --raw-bg:#0F2925;
+  --clean:#7AA2FF;   --clean-bg:#141E36;
+  --unified:#B892F6; --unified-bg:#20172F;
+  --new:#E0A455;     --new-bg:#2B2113;
+  --ok:#5CC79A;      --ok-bg:#0F2620;
+  --warn:#E0A455;    --warn-bg:#2B2113;
+  --stop:#F08379;    --stop-bg:#2E1715;
+  --code-bg:#090B0E; --code-ink:#E8EAEE;  --code-dim:#727A88;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+  --shadow-lg:0 2px 4px rgba(0,0,0,.4), 0 24px 60px -28px rgba(0,0,0,.9);
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html{scroll-behavior:smooth; scroll-padding-top:78px; -webkit-text-size-adjust:100%}
+@media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto} *{animation:none!important; transition:none!important} }
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font:15px/1.62 var(--sans); letter-spacing:-.005em;
+  -webkit-font-smoothing:antialiased;
+}
+img{max-width:100%}
+a{color:inherit}
+h1,h2,h3,h4{margin:0; letter-spacing:-.022em; line-height:1.18; font-weight:640}
+p{margin:0 0 .9em}
+code{font:500 12.5px/1.5 var(--mono); background:var(--bg-3); border:1px solid var(--line); padding:.1em .38em; border-radius:5px; white-space:nowrap}
+:root[data-theme="dark"] code, @media (prefers-color-scheme: dark){}
+small{font-size:12.5px}
+
+/* ── shell ─────────────────────────────────────────────────────────────── */
+.top{
+  position:sticky; top:0; z-index:60; background:color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter:saturate(1.6) blur(12px); -webkit-backdrop-filter:saturate(1.6) blur(12px);
+  border-bottom:1px solid var(--line);
+}
+.top-in{max-width:1280px; margin:0 auto; padding:0 22px; height:56px; display:flex; align-items:center; gap:18px}
+.brand{display:flex; align-items:center; gap:9px; font-weight:660; font-size:14px; white-space:nowrap}
+.brand .dot{width:9px;height:9px;border-radius:50%;background:var(--clean);box-shadow:0 0 0 3px var(--clean-bg)}
+.top nav{display:flex; gap:2px; overflow-x:auto; scrollbar-width:none; margin-left:auto}
+.top nav::-webkit-scrollbar{display:none}
+.top nav a{
+  font-size:12.5px; color:var(--ink-2); text-decoration:none; padding:6px 9px; border-radius:7px;
+  white-space:nowrap; transition:background .15s, color .15s;
+}
+.top nav a:hover{background:var(--bg-3); color:var(--ink)}
+.top nav a.on{color:var(--ink); background:var(--bg-3); font-weight:560}
+.tgl{
+  border:1px solid var(--line-2); background:var(--bg-2); color:var(--ink-2);
+  width:30px;height:30px;border-radius:8px;cursor:pointer;font-size:13px;line-height:1;
+  display:grid;place-items:center; flex:0 0 auto;
+}
+.tgl:hover{color:var(--ink); border-color:var(--ink-3)}
+@media (max-width:900px){ .top nav{display:none} }
+
+.wrap{max-width:1280px; margin:0 auto; padding:0 22px}
+section{padding:64px 0 8px; scroll-margin-top:70px}
+section > .eyebrow{
+  font:600 11px/1 var(--mono); letter-spacing:.1em; text-transform:uppercase;
+  color:var(--ink-3); margin-bottom:12px;
+}
+section > h2{font-size:clamp(22px,3vw,29px); margin-bottom:10px}
+section > .lede{font-size:16.5px; color:var(--ink-2); max-width:74ch; margin-bottom:26px}
+.rule{height:1px;background:var(--line);margin:56px 0 0}
+
+/* ── hero ──────────────────────────────────────────────────────────────── */
+.hero{padding:62px 0 26px}
+.hero h1{font-size:clamp(30px,5.2vw,50px); line-height:1.05; letter-spacing:-.032em; max-width:20ch}
+.hero .sub{font-size:17.5px; color:var(--ink-2); max-width:70ch; margin-top:16px}
+.pull{
+  margin:26px 0 0; padding:14px 0 14px 20px; border-left:3px solid var(--clean);
+  font:italic 500 19px/1.45 var(--serif); color:var(--ink); max-width:56ch;
+}
+.stats{
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(126px,1fr)); gap:1px;
+  background:var(--line); border:1px solid var(--line); border-radius:var(--r);
+  overflow:hidden; margin-top:34px;
+}
+.stat{background:var(--bg-2); padding:15px 16px}
+.stat b{display:block; font:700 24px/1.1 var(--sans); letter-spacing:-.03em}
+.stat span{display:block; font-size:11.5px; color:var(--ink-3); margin-top:5px; letter-spacing:.01em}
+.stat.good b{color:var(--ok)} .stat.warnv b{color:var(--warn)}
+
+/* ── generic blocks ────────────────────────────────────────────────────── */
+.card{background:var(--bg-2); border:1px solid var(--line); border-radius:var(--r); padding:18px 20px}
+.grid2{display:grid; grid-template-columns:1fr 1fr; gap:16px}
+.grid3{display:grid; grid-template-columns:repeat(3,1fr); gap:16px}
+@media (max-width:860px){ .grid2,.grid3{grid-template-columns:1fr} }
+
+.tbl-scroll{overflow-x:auto; border:1px solid var(--line); border-radius:var(--r); background:var(--bg-2)}
+table{border-collapse:collapse; width:100%; font-size:13.5px}
+th{
+  text-align:left; font:600 11px/1.3 var(--mono); letter-spacing:.07em; text-transform:uppercase;
+  color:var(--ink-3); padding:11px 14px; border-bottom:1px solid var(--line); white-space:nowrap;
+  background:var(--bg-2); position:sticky; top:0;
+}
+td{padding:11px 14px; border-bottom:1px solid var(--line); vertical-align:top; color:var(--ink-2)}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:var(--bg-3)}
+td strong, td b{color:var(--ink); font-weight:600}
+td code, th code{font-size:12px}
+
+.tag{
+  display:inline-block; font:600 10.5px/1.45 var(--mono); letter-spacing:.05em; text-transform:uppercase;
+  padding:2px 7px; border-radius:999px; white-space:nowrap; border:1px solid transparent;
+}
+.t-ok{color:var(--ok); background:var(--ok-bg)}
+.t-warn{color:var(--warn); background:var(--warn-bg)}
+.t-stop{color:var(--stop); background:var(--stop-bg)}
+.t-new{color:var(--new); background:var(--new-bg)}
+.t-raw{color:var(--raw); background:var(--raw-bg)}
+.t-clean{color:var(--clean); background:var(--clean-bg)}
+.t-uni{color:var(--unified); background:var(--unified-bg)}
+.t-seed{color:var(--seed); background:var(--seed-bg)}
+
+.note{
+  border-left:3px solid var(--line-2); padding:2px 0 2px 16px; color:var(--ink-2);
+  font-size:14px; margin:18px 0;
+}
+.note b{color:var(--ink)}
+
+pre{
+  margin:0; background:var(--code-bg); color:var(--code-ink); border-radius:var(--r);
+  padding:16px 18px; overflow-x:auto; font:13px/1.62 var(--mono); border:1px solid var(--line);
+}
+pre .c{color:var(--code-dim)}
+pre .g{color:#6FE0A8}
+pre .y{color:#FFC46B}
+.codewrap{position:relative}
+.copy{
+  position:absolute; top:9px; right:9px; z-index:2; border:1px solid rgba(255,255,255,.16);
+  background:rgba(255,255,255,.08); color:#D7DCE5; font:500 11px var(--mono);
+  padding:4px 9px; border-radius:6px; cursor:pointer;
+}
+.copy:hover{background:rgba(255,255,255,.16)}
+
+/* ── LINEAGE DIAGRAM ───────────────────────────────────────────────────── */
+.lin-controls{display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:14px}
+.chip{
+  font:500 12.5px var(--sans); border:1px solid var(--line-2); background:var(--bg-2); color:var(--ink-2);
+  padding:5px 12px; border-radius:999px; cursor:pointer; transition:all .14s;
+}
+.chip:hover{border-color:var(--ink-3); color:var(--ink)}
+.chip.on{background:var(--ink); color:var(--bg); border-color:var(--ink)}
+.chip-label{font:600 11px var(--mono); letter-spacing:.07em; text-transform:uppercase; color:var(--ink-3); margin-right:2px}
+
+.legend{display:flex; flex-wrap:wrap; gap:16px; align-items:center; margin:0 0 16px; font-size:12.5px; color:var(--ink-2)}
+.legend .li{display:flex; align-items:center; gap:7px}
+.sw{width:26px; height:14px; border-radius:4px; border:1px solid var(--line-2); flex:0 0 auto}
+.sw.delivered{background:var(--seed-bg); border-color:var(--line-2)}
+.sw.newobj{background:var(--bg-2); border:1px solid var(--line-2); box-shadow:inset 4px 0 0 var(--new)}
+
+.flow{
+  display:grid; grid-template-columns:repeat(4, minmax(212px,1fr)); gap:26px;
+  min-width:960px; margin:0 0 14px; align-items:stretch;
+}
+.flow .fs{
+  position:relative; border-radius:8px; padding:9px 13px; background:var(--bg-3);
+  border:1px solid var(--line);
+}
+.flow .fs .t{font:700 11px/1.2 var(--mono); letter-spacing:.09em; text-transform:uppercase}
+.flow .fs .d{font-size:11.5px; color:var(--ink-3); margin-top:2px; line-height:1.4}
+.flow .fs:not(:last-child)::after{
+  content:""; position:absolute; right:-19px; top:50%; width:12px; height:12px;
+  transform:translateY(-50%) rotate(45deg); border-top:2px solid var(--line-2); border-right:2px solid var(--line-2);
+}
+.flow .f1 .t{color:var(--seed)} .flow .f2 .t{color:var(--raw)}
+.flow .f3 .t{color:var(--clean)} .flow .f4 .t{color:var(--unified)}
+@media (max-width:900px){ .flow{grid-template-columns:1fr; min-width:0} .flow .fs::after{display:none} }
+
+.lin{
+  position:relative; border:1px solid var(--line); border-radius:var(--r); background:var(--bg-2);
+  padding:0; overflow:hidden;
+}
+.lin-scroll{overflow-x:auto; padding:18px}
+.lin-grid{
+  display:grid; grid-template-columns:repeat(4, minmax(212px,1fr)); gap:26px;
+  position:relative; min-width:960px;
+}
+#edges{position:absolute; inset:0; width:100%; height:100%; pointer-events:none; z-index:1; overflow:visible}
+.col{position:relative; z-index:2}
+.col-h{display:flex; align-items:baseline; gap:8px; margin-bottom:4px}
+.col-h .n{font:700 12px/1 var(--mono); letter-spacing:.09em; text-transform:uppercase}
+.col-h .c{font-size:11px; color:var(--ink-3); margin-left:auto; font-family:var(--mono)}
+.col-h .m{font-size:11px; color:var(--ink-3)}
+.col.source .col-h .n{color:var(--seed)}
+.col.raw .col-h .n{color:var(--raw)}
+.col.cleansed .col-h .n{color:var(--clean)}
+.col.unified .col-h .n{color:var(--unified)}
+.col-bar{height:2px; border-radius:2px; margin-bottom:12px}
+.col.source .col-bar{background:var(--seed)} .col.raw .col-bar{background:var(--raw)}
+.col.cleansed .col-bar{background:var(--clean)} .col.unified .col-bar{background:var(--unified)}
+
+.grp{font:600 10px/1 var(--mono); letter-spacing:.09em; text-transform:uppercase; color:var(--ink-3); margin:12px 0 6px}
+.grp:first-of-type{margin-top:0}
+
+.node{
+  display:block; width:100%; text-align:left; cursor:pointer; margin-bottom:5px;
+  background:var(--bg-2); border:1px solid var(--line); border-radius:7px;
+  padding:6px 9px 6px 10px; font:500 12px/1.35 var(--mono); color:var(--ink);
+  transition:opacity .16s, border-color .16s, background .16s, transform .16s;
+  position:relative; letter-spacing:-.01em;
+}
+.node:hover{border-color:var(--ink-3); transform:translateX(1px)}
+.node .nm{display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.node .gr{display:block; font:400 10.5px/1.3 var(--sans); color:var(--ink-3); margin-top:2px}
+.node.is-new{box-shadow:inset 4px 0 0 var(--new)}
+.node.is-new::after{content:""; position:absolute; left:0; top:0; bottom:0; width:4px; border-radius:6px 0 0 6px; background:var(--new)}
+.node.delivered{background:var(--seed-bg); border-color:var(--line-2)}
+.lin.has-sel .node{opacity:.22}
+.lin.has-sel .node.act{opacity:1}
+.node.sel{border-color:var(--ink); background:var(--bg-3); box-shadow:inset 3px 0 0 var(--ink)}
+.node.sel.is-new{box-shadow:inset 4px 0 0 var(--new), 0 0 0 1px var(--ink)}
+.lin.hide-delivered .col.source .node.delivered{display:none}
+.lin.hide-delivered .col.source .grp.d-only{display:none}
+
+.lin-panel{
+  border-top:1px solid var(--line); background:var(--bg-3); padding:16px 20px; min-height:104px;
+}
+.lp-empty{color:var(--ink-3); font-size:13.5px}
+.lp-head{display:flex; flex-wrap:wrap; align-items:center; gap:9px; margin-bottom:7px}
+.lp-head h4{font:600 15px var(--mono); letter-spacing:-.01em}
+.lp-desc{font-size:13.5px; color:var(--ink-2); max-width:92ch; margin-bottom:9px}
+.lp-meta{display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:8px 22px; font-size:12.5px}
+.lp-meta .k{font:600 10px var(--mono); letter-spacing:.08em; text-transform:uppercase; color:var(--ink-3); display:block; margin-bottom:2px}
+.lp-meta .v{color:var(--ink-2); font-size:12.5px; line-height:1.5}
+.lp-meta .v code{font-size:11.5px; white-space:normal}
+@media (max-width:900px){
+  #edges{display:none}
+  .lin-grid{min-width:0; grid-template-columns:1fr}
+}
+
+/* ── explorer / matrix ─────────────────────────────────────────────────── */
+.split{display:grid; grid-template-columns:230px 1fr; gap:0; border:1px solid var(--line); border-radius:var(--r); background:var(--bg-2); overflow:hidden}
+.split .list{border-right:1px solid var(--line); background:var(--bg-3); max-height:520px; overflow-y:auto}
+.split .list button{
+  display:block; width:100%; text-align:left; border:0; border-bottom:1px solid var(--line);
+  background:transparent; padding:10px 14px; cursor:pointer; font:500 12.5px var(--mono); color:var(--ink-2);
+}
+.split .list button:hover{background:var(--bg-2); color:var(--ink)}
+.split .list button.on{background:var(--bg-2); color:var(--ink); box-shadow:inset 3px 0 0 var(--clean)}
+.split .list button .st{display:block; font:400 10.5px var(--sans); margin-top:2px}
+.split .body{padding:20px 22px; min-height:300px}
+@media (max-width:760px){ .split{grid-template-columns:1fr} .split .list{max-height:190px; border-right:0; border-bottom:1px solid var(--line)} }
+
+.kv{display:grid; grid-template-columns:150px 1fr; gap:7px 16px; font-size:13px; margin:14px 0}
+.kv dt{font:600 10.5px var(--mono); letter-spacing:.07em; text-transform:uppercase; color:var(--ink-3); padding-top:2px}
+.kv dd{margin:0; color:var(--ink-2)}
+@media (max-width:560px){ .kv{grid-template-columns:1fr; gap:2px 0} .kv dd{margin-bottom:8px} }
+
+.keyrow{display:flex; gap:9px; align-items:baseline; padding:7px 0; border-bottom:1px dashed var(--line); font-size:13px}
+.keyrow:last-child{border-bottom:0}
+.keyrow .m{font:600 11px var(--mono); color:var(--ink-3); width:118px; flex:0 0 auto}
+.keyrow .v{font:500 12.5px var(--mono); color:var(--ink)}
+.keyrow .o{margin-left:auto; text-align:right}
+
+/* ── accordion ─────────────────────────────────────────────────────────── */
+details.acc{border:1px solid var(--line); border-radius:var(--r); background:var(--bg-2); margin-bottom:8px; overflow:hidden}
+details.acc > summary{
+  cursor:pointer; padding:13px 18px; font-weight:600; font-size:14.5px; list-style:none;
+  display:flex; align-items:center; gap:11px;
+}
+details.acc > summary::-webkit-details-marker{display:none}
+details.acc > summary::after{content:"+"; margin-left:auto; color:var(--ink-3); font:400 17px var(--mono)}
+details.acc[open] > summary::after{content:"−"}
+details.acc > summary:hover{background:var(--bg-3)}
+details.acc .in{padding:2px 18px 18px; border-top:1px solid var(--line); color:var(--ink-2); font-size:14px}
+details.acc .in > *:first-child{margin-top:14px}
+details.acc .in p:last-child{margin-bottom:0}
+.qn{font:700 11px var(--mono); color:var(--ink-3); flex:0 0 auto}
+
+footer{margin-top:64px; border-top:1px solid var(--line); padding:26px 0 48px; color:var(--ink-3); font-size:12.5px}
+footer a{color:var(--ink-2)}
+.f-links{display:flex; gap:18px; flex-wrap:wrap; margin-top:8px}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <div class="top-in">
+    <div class="brand"><span class="dot"></span> GTM Intelligence Platform</div>
+    <nav id="nav">
+      <a href="#pipeline">Pipeline</a>
+      <a href="#new">What's new</a>
+      <a href="#eda">The data</a>
+      <a href="#identity">Identity</a>
+      <a href="#surfaces">Surfaces</a>
+      <a href="#resolution">Resolution</a>
+      <a href="#reps">Account 360</a>
+      <a href="#quality">Data quality</a>
+      <a href="#tests">Tests</a>
+      <a href="#memo">Memo</a>
+    </nav>
+    <button class="tgl" id="theme" title="Toggle theme" aria-label="Toggle theme">◐</button>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <!-- ══ HERO ═══════════════════════════════════════════════════════════ -->
+  <header class="hero">
+    <h1>Three worlds, one account view — and no bad merges.</h1>
+    <p class="sub">
+      Product usage, Salesforce and a third-party company feed arrive with no shared key.
+      This is the dbt project that resolves them into something a rep can act on, built
+      medallion-style: <strong>raw → cleansed → unified</strong>. Every resolved link carries its
+      source and a confidence. Every conflict raises a flag instead of guessing.
+    </p>
+    <blockquote class="pull">“An unresolved mapping is better than a bad merge.”</blockquote>
+
+    <div class="stats">
+      <div class="stat"><b data-count="delivered">18</b><span>CSVs delivered</span></div>
+      <div class="stat"><b data-count="introduced">41</b><span>objects introduced</span></div>
+      <div class="stat"><b>38</b><span>dbt models</span></div>
+      <div class="stat"><b>168</b><span>tests (166 data · 2 unit)</span></div>
+      <div class="stat good"><b>223</b><span>pass</span></div>
+      <div class="stat warnv"><b>4</b><span>intended warnings</span></div>
+      <div class="stat"><b>0</b><span>errors</span></div>
+    </div>
+  </header>
+
+  <div class="rule"></div>
+
+  <!-- ══ PIPELINE ═══════════════════════════════════════════════════════ -->
+  <section id="pipeline">
+    <div class="eyebrow">01 · End-to-end data flow</div>
+    <h2>The pipeline, and everything it introduces</h2>
+    <p class="lede">
+      Eighteen CSVs came with the brief. Forty-one objects were built on top of them — three
+      reference seeds that hold the platform's <em>rules as data</em>, eighteen typed staging
+      views, twelve intermediate tables where the actual resolution happens, and eight
+      business-facing marts. Click any box to trace its full lineage in both directions.
+    </p>
+
+    <div class="legend">
+      <div class="li"><span class="sw delivered"></span> Delivered with the brief · <strong><span data-count="delivered">18</span> CSVs</strong></div>
+      <div class="li"><span class="sw newobj"></span> Introduced by this project · <strong><span data-count="introduced">41</span> objects</strong></div>
+      <div class="li" style="color:var(--ink-3)">Click a node → its ancestors and descendants light up</div>
+    </div>
+    <p style="font-size:12.5px; color:var(--ink-3); margin:-6px 0 14px; max-width:88ch">
+      <strong style="color:var(--ink-2)">Generated, not drawn.</strong>
+      Every node, layer, pass and edge below is read out of dbt's own
+      <code>target/manifest.json</code> by <code>docs/build_lineage.py</code> — including the four CLEANSED
+      passes, which are computed as dependency depth rather than asserted. The diagram cannot drift from
+      the DAG dbt actually builds, and a model added without a one-line description fails the generator.
+      <span id="buildstamp"></span>
+    </p>
+
+    <div class="lin-controls">
+      <span class="chip-label">Trace</span>
+      <button class="chip on" data-preset="none">Full picture</button>
+      <button class="chip" data-preset="identity">Identity spine</button>
+      <button class="chip" data-preset="external">External resolution</button>
+      <button class="chip" data-preset="surface">Surface adoption</button>
+      <button class="chip" data-preset="rep">What a rep opens</button>
+      <span style="flex:1"></span>
+      <button class="chip" id="onlyNew">Hide delivered seeds</button>
+    </div>
+
+    <div class="lin" id="lin">
+      <div class="lin-scroll">
+        <div class="flow">
+          <div class="fs f1"><div class="t">Land</div><div class="d">CSVs as delivered, plus the rules kept as data</div></div>
+          <div class="fs f2"><div class="t">Type</div><div class="d">One view per seed. Cast, null-normalise, parse JSON</div></div>
+          <div class="fs f3"><div class="t">Resolve</div><div class="d">Compare → relate → decide → classify, in four passes</div></div>
+          <div class="fs f4"><div class="t">Serve</div><div class="d">Members, adoption, signals, the 360, prospects</div></div>
+        </div>
+        <div class="lin-grid" id="grid">
+          <svg id="edges" aria-hidden="true"></svg>
+          <!-- columns injected by JS -->
+        </div>
+      </div>
+      <div class="lin-panel" id="panel">
+        <div class="lp-empty">Select a node to see its grain, what it reads, what it decides, and who reads it.</div>
+      </div>
+    </div>
+
+    <div class="note">
+      <b>Why the layers are materialised the way they are.</b> Staging is <em>views</em> — a rename and a
+      cast over one seed; copying the data would buy nothing and create a second copy to drift.
+      Cleansed is <em>tables</em> — identity resolution is the expensive, opinionated part, and computing
+      it once means every mart reads the same answer rather than each recomputing the match ladder.
+      Unified is <em>views only</em> — always current, nothing to schedule, no “when was this last refreshed?”.
+    </div>
+  </section>
+
+  <div class="rule"></div>
+
+  <!-- ══ WHAT'S NEW ═════════════════════════════════════════════════════ -->
+  <section id="new">
+    <div class="eyebrow">02 · Inventory</div>
+    <h2>What was delivered, and what was built</h2>
+    <p class="lede">
+      The eighteen delivered CSVs are loaded byte-for-byte, untouched, and nothing preprocesses them —
+      you can diff <code>seeds/raw/</code> against what was sent. Everything below the line is new.
+    </p>
+
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th>Layer</th><th>Count</th><th>Objects</th><th>Why it exists</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="tag t-seed">Delivered</span></td><td><strong>18</strong></td>
+            <td><code>raw_*.csv</code> — 12 product, 2 CRM, 4 external</td>
+            <td>Loaded as dbt seeds exactly as they arrived, next to the original <code>SEEDS_README.md</code>.</td>
+          </tr>
+          <tr>
+            <td><span class="tag t-new">New</span> <span class="tag t-seed">Seeds</span></td><td><strong>3</strong></td>
+            <td><code>ref_surface_signals</code>, <code>ref_org_mapping_sources</code>, <code>ref_external_match_rules</code></td>
+            <td>The platform's rules kept as <em>data</em>, not buried in SQL. Changing what a signal proves, or what a
+                match key is worth, is a CSV edit and a code review — not a model rewrite.</td>
+          </tr>
+          <tr>
+            <td><span class="tag t-new">New</span> <span class="tag t-raw">Raw</span></td><td><strong>18</strong></td>
+            <td><code>stg_product__*</code> (12), <code>stg_crm__*</code> (2), <code>stg_signals__*</code> (4)</td>
+            <td>One typed 1:1 view per seed: rename, cast, <code>''</code> → null, JSON parsed into ordinary columns.
+                No business logic — which is what makes the swap to real sources a one-line change per model.</td>
+          </tr>
+          <tr>
+            <td><span class="tag t-new">New</span> <span class="tag t-clean">Cleansed</span></td><td><strong>12</strong></td>
+            <td>4 key-builders, 4 relaters, 2 resolvers, 2 classifiers</td>
+            <td>Where every decision is made, in four passes that never mix: make rows comparable → relate them →
+                decide → classify. A model that both resolves <em>and</em> scores is one nobody can debug later.</td>
+          </tr>
+          <tr>
+            <td><span class="tag t-new">New</span> <span class="tag t-uni">Unified</span></td><td><strong>8</strong></td>
+            <td>2 dims, 3 facts, <code>account_360</code>, <code>net_new_prospects</code>, <code>rpt_resolution_quality</code></td>
+            <td>Shape only — no matching, no scoring, no dedupe. Everything here was already decided upstream.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="grid3" style="margin-top:16px">
+      <div class="card">
+        <h4 style="font-size:14px; margin-bottom:6px">One normaliser</h4>
+        <p style="font-size:13.5px; color:var(--ink-2); margin:0">
+          <code>int_match_keys</code> builds the Salesforce keys and the vendor keys in the
+          <em>same CTEs</em>. Two models can't normalise the same thing differently, because no
+          other model normalises anything.
+        </p>
+      </div>
+      <div class="card">
+        <h4 style="font-size:14px; margin-bottom:6px">One extension point</h4>
+        <p style="font-size:13.5px; color:var(--ink-2); margin:0">
+          Adding a source — intent data, support tickets, billing — is one more
+          <code>union</code> branch in <code>fct_account_signals</code>. The 360, the alerting and
+          the reverse-ETL pick it up for free.
+        </p>
+      </div>
+      <div class="card">
+        <h4 style="font-size:14px; margin-bottom:6px">One definition per number</h4>
+        <p style="font-size:13.5px; color:var(--ink-2); margin:0">
+          Trace growth used to be recomputed in three marts. It now lives in
+          <code>int_account_trace_trend</code> and is read three times, so it can't drift.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <div class="rule"></div>
+
+  <!-- ══ EDA ════════════════════════════════════════════════════════════ -->
+  <section id="eda">
+    <div class="eyebrow">03 · Before any SQL</div>
+    <h2>Read the data first</h2>
+    <p class="lede">
+      163 rows across 77 columns, profiled before a single model was written. Eight questions
+      decided the whole architecture — the answers are why the identity spine, the surface rules
+      and the match ladder look the way they do.
+    </p>
+
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th style="width:34%">Question</th><th>What the data said</th><th style="width:22%">So</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Is one <code>user_id</code> one person?</strong></td>
+              <td><span class="tag t-stop">No</span> 9 logins, 8 people. <code>grace@acme.com</code> signed up twice.</td>
+              <td>Exact-email merge; both ids kept.</td></tr>
+          <tr><td><strong>Does a person belong to one org?</strong></td>
+              <td><span class="tag t-stop">No</span> Two logins sit in two orgs, and Frank's two orgs belong to two different accounts.</td>
+              <td>Person→account only when all orgs agree.</td></tr>
+          <tr><td><strong>Does every org have a CRM account?</strong></td>
+              <td><span class="tag t-stop">No</span> Five of six map, and one of those only through a fallback rule.</td>
+              <td>Unmapped orgs are prospects, not errors.</td></tr>
+          <tr><td><strong>Do objects belong to their creator's org?</strong></td>
+              <td><span class="tag t-ok">Yes</span> All 31 of them.</td>
+              <td><code>project → org</code> is the safe attribution path.</td></tr>
+          <tr><td><strong>Does anything name the client or surface?</strong></td>
+              <td><span class="tag t-stop">No</span> No column records a client, surface, user-agent or which API key created an object.</td>
+              <td>Surface must be inferred from side-effects — and labelled as such.</td></tr>
+          <tr><td><strong>How much origin evidence is there?</strong></td>
+              <td>17 of 22 experiments carry <code>repo_info</code>; across all 31 objects, <strong>12 have none at all</strong>.</td>
+              <td>12 objects are <code>unknown</code>, never guessed as UI.</td></tr>
+          <tr><td><strong>Do the external identifiers join as delivered?</strong></td>
+              <td><span class="tag t-stop">No</span> Not one vendor website equals a CRM domain literally. Ten non-null websites arrive in seven shapes.</td>
+              <td>Normalise first, then match. That's when <code>hooli.com</code> turns out to belong to two accounts.</td></tr>
+          <tr><td><strong>What window does the data cover?</strong></td>
+              <td>Everything ends <strong>2026-07-27</strong>; traces rise exactly 0.7&nbsp;GB/day for every org, so clearly synthetic.</td>
+              <td>Every window runs from a frozen <code>as_of_date</code>, never <code>current_date</code>.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="rule"></div>
+
+  <!-- ══ IDENTITY ═══════════════════════════════════════════════════════ -->
+  <section id="identity">
+    <div class="eyebrow">04 · Part A</div>
+    <h2>The identity spine</h2>
+    <p class="lede">
+      Each join below was picked because the profile said it holds, and each rejected alternative
+      was rejected because the profile said it doesn't.
+    </p>
+
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th>Join</th><th>Key used</th><th>Why that one</th><th>Rejected</th></tr></thead>
+        <tbody>
+          <tr><td><strong>login → person</strong></td><td><code>lower(trim(email))</code></td>
+              <td>The inbox is the credential. An exact match is a fact, not a guess.</td>
+              <td>Name, or email domain — <code>acme.com</code> alone covers three different people.</td></tr>
+          <tr><td><strong>person → org</strong></td><td><code>raw_members</code></td>
+              <td>It really is many-to-many.</td><td>Assuming one org per user, which would quietly move Frank's Umbrella work onto Globex.</td></tr>
+          <tr><td><strong>object → org</strong></td><td><code>project_id → projects.org_id</code></td>
+              <td>All 31 objects sit in a project belonging to their creator's org. A fact about the object.</td>
+              <td><code>user_id → member org</code>, ambiguous for multi-org people.</td></tr>
+          <tr><td><strong>org → account</strong></td><td><code>account_org_map</code> + <code>mapping_source</code></td>
+              <td>The <em>source</em> of the link is what becomes the confidence: contract 0.95 › billing parent 0.85 › fallback 0.50.</td>
+              <td>Matching member email domains — Globex has no CRM domain at all.</td></tr>
+          <tr><td><strong>browser event → account</strong></td><td>the person, only when unambiguous</td>
+              <td>Page views carry a <code>user_id</code> and nothing else.</td>
+              <td>Picking someone's “main” org — a coin flip for a two-account person.</td></tr>
+          <tr><td><strong>traces → org</strong></td><td><code>trace_volume.org_id</code></td>
+              <td>The grain is org × day with no user column: org-level evidence, full stop.</td>
+              <td>Splitting GB across members by headcount. That's invented precision.</td></tr>
+          <tr><td><strong>external company → account</strong></td><td>LinkedIn slug › domain › LinkedIn-reported domain</td>
+              <td>LinkedIn slugs are unique per legal entity; <code>hooli.com</code> covers two accounts.</td>
+              <td>Company name — it would send “Hooli Inc” to the wrong Hooli.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note">
+      <b>What a <code>user_id</code> on an object actually is.</b> The login whose session or API key made the
+      call — not necessarily a human. Bob's twelve experiments run nightly between 02:01 and 02:12
+      with <code>ci_run_id = gha-10xx</code>, <code>author_name = ci-runner</code>, under a key named
+      <code>ci-service</code>. That's a GitHub Action. So the <em>actor</em> is classified separately from the
+      login: Bob is an <code>automation_identity</code>, his runs prove the <em>account</em> uses the SDK, and he is
+      never counted as a member using the product. In <code>dim_members</code> that reads
+      <code>sdk_evidence = no_evidence</code> beside <code>sdk_evidence_any_actor = usage_proven</code> — the machine
+      is visible without being mistaken for a person.
+    </div>
+  </section>
+
+  <div class="rule"></div>
+
+  <!-- ══ SURFACES ═══════════════════════════════════════════════════════ -->
+  <section id="surfaces">
+    <div class="eyebrow">05 · Part A</div>
+    <h2>Surfaces: what each signal can and cannot prove</h2>
+    <p class="lede">
+      Nine signals, each with a surface, an evidence kind, an attribution class and a confidence —
+      all of it a row in <code>ref_surface_signals</code>, not a <code>CASE</code> statement. Click one to see what it
+      is honestly worth.
+    </p>
+
+    <div class="split">
+      <div class="list" id="sigList"></div>
+      <div class="body" id="sigBody"></div>
+    </div>
+
+    <div class="grid2" style="margin-top:16px">
+      <div class="card" style="border-left:3px solid var(--ok)">
+        <h4 style="font-size:14px; margin-bottom:6px">What can be proven</h4>
+        <p style="font-size:13.5px; color:var(--ink-2); margin:0">
+          <strong>UI</strong> is deterministic — a logged-in page view is a page view.
+          <strong>SDK</strong> is deterministic for 18 of 31 objects and heuristic for one more, on
+          <code>repo_info</code> and CI tags, plus org-level proof from trace ingestion.
+        </p>
+      </div>
+      <div class="card" style="border-left:3px solid var(--stop)">
+        <h4 style="font-size:14px; margin-bottom:6px">What cannot</h4>
+        <p style="font-size:13.5px; color:var(--ink-2); margin:0">
+          <strong>CLI</strong> usage is <em>not observable</em> — the wizard is a browser event and a key name is
+          free text. <strong>MCP</strong> the same. Both are capped at <code>intent_only</code>, and a test called
+          <code>cli_and_mcp_never_claimed_as_usage</code> fails the build if anyone ever changes that.
+        </p>
+      </div>
+    </div>
+
+    <div class="note">
+      <b>Where the proof sits matters as much as whether it exists.</b> Initech reads
+      <code>sdk: usage_proven</code> while <code>pct_members_usage_proven = 0</code> — because the only evidence is
+      the org's trace ingestion, and no individual member can be shown to have written code.
+      <code>evidence_level</code> says <code>org</code> rather than <code>member</code> for exactly that row, so no dashboard
+      can render the status without the caveat.
+    </div>
+  </section>
+
+  <div class="rule"></div>
+
+  <!-- ══ RESOLUTION ═════════════════════════════════════════════════════ -->
+  <section id="resolution">
+    <div class="eyebrow">06 · Part B — the CDP core</div>
+    <h2>External → account resolution</h2>
+    <p class="lede">
+      Not one vendor website equals a CRM domain as delivered. Normalisation happens once, in plain
+      SQL — lower, trim, strip, split — and then four rules decide. Pick a company to see the keys it
+      produced, what each one pointed at, and why it landed where it did.
+    </p>
+
+    <div class="grid2" style="margin-bottom:18px">
+      <div class="card">
+        <h4 style="font-size:14px; margin-bottom:10px">The four rules</h4>
+        <ol style="margin:0; padding-left:20px; font-size:13.5px; color:var(--ink-2); line-height:1.75">
+          <li>Only a key pointing at <strong>exactly one</strong> account may decide.</li>
+          <li>The highest-precedence deciding key wins: <strong>LinkedIn slug › website domain › LinkedIn-reported domain</strong>.</li>
+          <li>Every other key that matched must <strong>agree</strong>, or it's a conflict and nothing is assigned.</li>
+          <li><strong>Names never decide.</strong> A name pointing elsewhere costs 0.20 and holds the match for a steward.</li>
+        </ol>
+      </div>
+      <div class="card">
+        <h4 style="font-size:14px; margin-bottom:10px">Normalisation, worked</h4>
+        <div style="font:12px/1.9 var(--mono); color:var(--ink-2)">
+          <div><span style="color:var(--ink-3)">https://www.Acme.com/products?utm=x</span> → <strong style="color:var(--ink)">acme.com</strong></div>
+          <div><span style="color:var(--ink-3)">http://globex.io/products</span> → <strong style="color:var(--ink)">globex.io</strong></div>
+          <div><span style="color:var(--ink-3)">https://piedpiper.com/?utm_source=news</span> → <strong style="color:var(--ink)">piedpiper.com</strong></div>
+          <div><span style="color:var(--ink-3)">…/company/pied-piper/</span> → <strong style="color:var(--ink)">pied-piper</strong></div>
+          <div><span style="color:var(--ink-3)">http://uk.linkedin.com/company/Acme-Corp/?trk=abc</span> → <strong style="color:var(--ink)">acme-corp</strong></div>
+        </div>
+        <p style="font-size:12.5px; color:var(--ink-3); margin:11px 0 0">
+          The last line is a country sub-domain — a shape the brief names but the seeds don't contain.
+          It's covered by a dbt <em>unit</em> test, not by hope.
+        </p>
+      </div>
+    </div>
+
+    <div class="split">
+      <div class="list" id="coList"></div>
+      <div class="body" id="coBody"></div>
+    </div>
+
+    <div class="note">
+      <b>Unresolved leaves through two doors, not one.</b> The brief asks that unresolved companies be
+      kept — none are dropped. But “kept” isn't “prospected”. <code>sc10 Prospect AI</code> has clean keys and
+      simply has no account, so it's a net-new prospect. <code>sc11</code> is a duplicate Acme record and
+      <code>sc07</code> has no identifiers at all: for both, an account almost certainly already exists, and
+      putting them on a prospecting list would be a second error stacked on the first. They go to the
+      review queue with the reason attached, and
+      <code>assert_every_external_company_has_one_output</code> proves each of the eleven takes exactly one door.
+    </div>
+  </section>
+
+  <div class="rule"></div>
+
+  <!-- ══ REPS ═══════════════════════════════════════════════════════════ -->
+  <section id="reps">
+    <div class="eyebrow">07 · Part C</div>
+    <h2>What a rep actually opens</h2>
+    <p class="lede">
+      One row per Salesforce account — including the ones with no footprint yet — reading as four
+      blocks: who they are, how they use the product, what's happened lately, and why to call.
+      <code>action_reasons</code> is ordered strongest-then-freshest, so the first thing read is the best
+      reason, not the alphabetically first one.
+    </p>
+
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr>
+          <th>#</th><th>Account</th><th>Plan</th><th>Members</th>
+          <th>UI</th><th>SDK</th><th>CLI</th><th>MCP</th><th>Why call</th>
+        </tr></thead>
+        <tbody id="a360"></tbody>
+      </table>
+    </div>
+
+    <div class="grid3" style="margin-top:16px">
+      <div class="card">
+        <h4 style="font-size:14px; margin-bottom:6px">Held back on purpose</h4>
+        <p style="font-size:13.5px; color:var(--ink-2); margin:0">
+          Initech's <strong>+163 %</strong> trace surge is real, but the org→account link is a 0.50 fallback.
+          It sits in <code>signals_needing_review</code> instead of being pushed to a rep.
+        </p>
+      </div>
+      <div class="card">
+        <h4 style="font-size:14px; margin-bottom:6px">Two review queues</h4>
+        <p style="font-size:13.5px; color:var(--ink-2); margin:0">
+          <code>external_records_pending_review</code> — couldn't be resolved.
+          <code>external_records_awaiting_confirmation</code> — resolved, but the name disagrees.
+          Different problems, different fixes, so different columns.
+        </p>
+      </div>
+      <div class="card">
+        <h4 style="font-size:14px; margin-bottom:6px">Net-new is an output</h4>
+        <p style="font-size:13.5px; color:var(--ink-2); margin:0">
+          <code>Prospect AI</code> (external, 3 signals) and <code>Startup Sandbox</code> (a free-plan sign-up with
+          one member, no CRM account) both land in <code>net_new_prospects</code>.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <div class="rule"></div>
+
+  <!-- ══ QUALITY ════════════════════════════════════════════════════════ -->
+  <section id="quality">
+    <div class="eyebrow">08 · Part D</div>
+    <h2>Fifteen data issues, and what each one does to the pipeline</h2>
+    <p class="lede">
+      Four of these are wired to <code>warn</code>-severity tests rather than silenced, so they show up in
+      every single run instead of being forgotten. The build is green with four warnings by design.
+    </p>
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th style="width:22%">Where</th><th style="width:42%">What</th><th>How it's handled</th></tr></thead>
+        <tbody id="issues"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="rule"></div>
+
+  <!-- ══ TESTS ══════════════════════════════════════════════════════════ -->
+  <section id="tests">
+    <div class="eyebrow">09 · Part D</div>
+    <h2>Tests that assert principles, not shapes</h2>
+    <p class="lede">
+      166 data tests and 2 unit tests. Contracts and grains are table stakes; these are the ones
+      that encode the judgement calls, named so a failure explains itself.
+    </p>
+
+    <div class="grid2">
+      <div class="card">
+        <h4 style="font-size:14px; margin-bottom:9px">Principles as tests</h4>
+        <div style="font:12px/2 var(--mono); color:var(--ink-2)">
+          every_resolved_mapping_has_source_and_confidence<br>
+          conflicts_are_flagged_never_resolved<br>
+          company_name_never_decides_a_match<br>
+          flagged_signals_never_reach_reps
+        </div>
+      </div>
+      <div class="card">
+        <h4 style="font-size:14px; margin-bottom:9px">No silent drops</h4>
+        <div style="font:12px/2 var(--mono); color:var(--ink-2)">
+          no_external_company_dropped_in_resolution<br>
+          no_org_dropped_in_account_mapping<br>
+          account_360_has_every_salesforce_account<br>
+          assert_every_external_company_has_one_output
+        </div>
+      </div>
+      <div class="card">
+        <h4 style="font-size:14px; margin-bottom:9px">Honesty guardrails</h4>
+        <div style="font:12px/2 var(--mono); color:var(--ink-2)">
+          cli_and_mcp_never_claimed_as_usage<br>
+          no_usage_percentage_for_unmeasurable_surfaces<br>
+          org_level_proof_never_reported_as_member_usage<br>
+          automation_identity_never_shown_as_a_human_user<br>
+          assert_objects_attributed_by_project_not_by_user
+        </div>
+      </div>
+      <div class="card" style="border-color:var(--new)">
+        <h4 style="font-size:14px; margin-bottom:9px">
+          Unit tests <span class="tag t-new" style="margin-left:4px">new</span>
+        </h4>
+        <p style="font-size:13px; color:var(--ink-2); margin:0 0 8px">
+          Fixed inputs, fixed expected output, no seed data — so a refactor that still happens to fit
+          these 21 rows still fails.
+        </p>
+        <div style="font:12px/2 var(--mono); color:var(--ink-2)">
+          match_keys_normalise_every_url_shape<br>
+          resolution_precedence_and_conflict_rules
+        </div>
+      </div>
+    </div>
+
+    <div class="note">
+      <b>Why unit tests earn their place here.</b> <code>assert_match_keys_are_normalised</code> pins the expected
+      domain, slug and name key for all 21 real entities. But the brief explicitly names URL shapes the
+      seeds don't contain — a LinkedIn country sub-domain, most of all. The unit test feeds those
+      shapes straight into <code>int_match_keys</code>: a port and a multi-part TLD
+      (<code>HTTPS://WWW.EXAMPLE.CO.UK:8443/path</code> → <code>example.co.uk</code>), a trailing dot, a fragment, and a
+      company whose leading word is “the” — which is marked unusable for entity checking rather than
+      quietly trusted. Its sibling pins one row per outcome of the match ladder, conflict and
+      name-contradiction included.
+    </div>
+
+    <div class="codewrap" style="margin-top:16px">
+      <button class="copy" data-copy="run">Copy</button>
+      <pre id="run"><span class="c"># Python 3.9+; the default target is a local DuckDB file, so there is no warehouse to set up.</span>
+python -m venv .venv &amp;&amp; source .venv/bin/activate
+pip install <span class="y">"dbt-core&gt;=1.10,&lt;2"</span> <span class="y">"dbt-duckdb&gt;=1.9"</span>
+export DBT_PROFILES_DIR=.
+dbt build
+
+<span class="c"># Done. PASS=<span class="g">223</span> WARN=<span class="y">4</span> ERROR=<span class="g">0</span> SKIP=0 TOTAL=227</span>
+<span class="c"># The four warnings are the four data-quality alerts. They are meant to be there.</span>
+
+dbt build -s int_match_keys+       <span class="c"># blast radius of a change to the normaliser</span>
+dbt build -s +account_360          <span class="c"># the rep view and every ancestor</span>
+dbt docs generate &amp;&amp; dbt docs serve</pre>
+    </div>
+  </section>
+
+  <div class="rule"></div>
+
+  <!-- ══ MEMO ═══════════════════════════════════════════════════════════ -->
+  <section id="memo">
+    <div class="eyebrow">10 · The memo</div>
+    <h2>Six questions, answered</h2>
+    <p class="lede">The full text is in <code>MEMO.md</code>. These are the answers in short.</p>
+
+    <details class="acc" open>
+      <summary><span class="qn">Q1</span> Is surface attribution deterministic, heuristic, or impossible?</summary>
+      <div class="in">
+        <div class="tbl-scroll" style="border-radius:8px">
+          <table>
+            <thead><tr><th>Surface</th><th>Attribution</th><th>Columns it rests on</th></tr></thead>
+            <tbody>
+              <tr><td><strong>UI</strong></td><td><span class="tag t-ok">Deterministic</span></td><td><code>raw_segment_pages.user_id</code>, <code>path</code></td></tr>
+              <tr><td><strong>SDK</strong></td><td><span class="tag t-ok">Deterministic</span> for 18 of 31 objects, <span class="tag t-warn">heuristic</span> for 1 more — and impossible to separate from the CLI</td><td><code>repo_info</code>; <code>metadata.ci_run_id / ci / source</code>; <code>raw_trace_volume</code> (org × day)</td></tr>
+              <tr><td><strong>CLI</strong></td><td><span class="tag t-stop">Impossible</span> for usage; <span class="tag t-warn">heuristic</span> for intent</td><td><code>raw_cli_wizard</code> (a browser event); <code>raw_api_keys.name</code> containing “cli”</td></tr>
+              <tr><td><strong>MCP</strong></td><td><span class="tag t-stop">Impossible</span> for usage; <span class="tag t-warn">heuristic</span> for intent</td><td><code>raw_docs_mcp_events.action</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p style="margin-top:14px">Nothing in the eighteen files names a client, user-agent or key id, so the CLI — which wraps the
+        SDK — cannot be separated from it, and the twelve objects carrying neither field are recorded
+        <code>unknown</code>, not SDK.</p>
+      </div>
+    </details>
+
+    <details class="acc">
+      <summary><span class="qn">Q2</span> How would you measure whether the matching is good — and precision or recall?</summary>
+      <div class="in">
+        <p>Five things, all recomputed by <code>rpt_resolution_quality</code> on every run: <strong>precision</strong> on a
+        monthly steward-labelled sample split by <code>match_method</code>, with a 98 % bar for anything a rep sees;
+        <strong>coverage</strong> (8 of 11 companies carry an account, though only 7 deliver signals);
+        <strong>corroboration</strong> (4 of 8 matches rest on two or more independent keys); <strong>conflict and
+        ambiguity rates</strong> as drift alarms; and <strong>how often reps click “wrong account”</strong>.</p>
+        <p><strong>Precision, every time.</strong> A bad merge sends a rep another company's news and costs the tool its
+        credibility; a miss just sits in a queue where someone can still find it. That single stance is what
+        produced all four precedence rules.</p>
+      </div>
+    </details>
+
+    <details class="acc">
+      <summary><span class="qn">Q3</span> “What % of the account is using the CLI?”</summary>
+      <div class="in">
+        <p><strong>Not truthfully, no.</strong> For Globex I'd give three numbers: CLI usage is <em>not measurable</em>;
+        setup intent covers 1 of 3 known product members, with a second not counted because he belongs to two
+        accounts; and code-based usage by a person — which cannot be split between SDK and CLI — is 1 of 3,
+        plus a CI job under a member's key.</p>
+        <p>I won't give a CLI percentage, won't infer CLI from <code>repo_info</code> or key names, and would drop
+        “% of the account” altogether: the denominator is <em>product members</em>, not headcount.
+        <code>cli_and_mcp_never_claimed_as_usage</code> keeps that honest in code, and
+        <code>account_360.adoption_in_plain_english</code> carries those exact sentences to the rep.</p>
+      </div>
+    </details>
+
+    <details class="acc">
+      <summary><span class="qn">Q4</span> One instrumentation change, one data addition</summary>
+      <div class="in">
+        <p><strong>Product.</strong> Captured at the API gateway from the client user-agent or MCP server id: stamp
+        <code>client_surface</code>, client version and <code>api_key_id</code> on every write. Stored denormalised on the
+        object tables and in a new <code>api_request_log</code>. CLI and MCP become deterministic, SDK separates from
+        CLI, and service keys identify themselves.</p>
+        <p><strong>CRM.</strong> Captured from an enrichment vendor at account creation and on refresh. Stored as
+        required <code>website_domain</code> and <code>linkedin_company_url</code> on Account, plus a populated
+        <code>ParentId</code>. Missing identifiers cause most non-matches; the hierarchy lets Hooli and Hooli XYZ roll
+        up without merging.</p>
+      </div>
+    </details>
+
+    <details class="acc">
+      <summary><span class="qn">Q5</span> What sales motion does this serve, and how would you know it's useful?</summary>
+      <div class="in">
+        <p><strong>Expansion.</strong> Usage surges on non-Enterprise plans, CLI and MCP intent as an enablement
+        opening, and funding / launch / hiring news. <code>net_new_prospects</code> feeds a product-led motion into
+        sales alongside it.</p>
+        <p>Two leading indicators say whether it's working — do reps open the 360, and what share of signals get
+        acted on rather than dismissed. Two lagging ones settle it: signal-sourced pipeline and expansion ARR,
+        measured against a random holdout. A signal type with no lift, or more than ~70 % dismissed, gets cut.</p>
+      </div>
+    </details>
+
+    <details class="acc">
+      <summary><span class="qn">Q6</span> How would you find which signals actually drive value?</summary>
+      <div class="in">
+        <ol style="padding-left:20px; line-height:1.8">
+          <li>Fix the outcome first: an opportunity, upgrade or expansion within 30–90 days.</li>
+          <li>Snapshot <code>fct_account_signals</code> daily. It's already one shape, so it doubles as the feature
+              store and joins straight to opportunities.</li>
+          <li>Per signal type, measure lift over baseline (controlled for plan and size), lead time and precision
+              at top-N. Then learn weights to replace the v0 rules — keeping the reasons visible.</li>
+          <li>Use holdouts so signals don't take credit for deals that would have closed anyway, treat rep
+              dispositions as labels, and retire whatever shows no lift.</li>
+        </ol>
+      </div>
+    </details>
+
+    <div class="note" style="margin-top:22px">
+      <b>Where I'd invest next, in order.</b> ① Surface telemetry — <code>client_surface</code> and <code>api_key_id</code> on
+      every write turns CLI and MCP from unmeasurable into deterministic. ② A labelled match set of 100–200
+      steward-verified pairs, so precision is measured rather than assumed. ③ History — snapshot the 360 and
+      the signal feed daily; you can't learn which signals drive pipeline without knowing what a rep saw and
+      when. ④ Account hierarchy, so Hooli and Hooli XYZ roll up without anything being merged.
+      ⑤ Delivery — reverse-ETL into Salesforce tasks or Slack with a “wrong account” button feeding straight
+      back into the scorecard.
+    </div>
+  </section>
+
+  <footer>
+    <div>Roughly 4–6 hours. Built on dbt-core 1.12.4 with dbt-duckdb 1.11.0; the same code targets Snowflake through three dialect shims.</div>
+    <div class="f-links">
+      <a href="../README.md">README</a>
+      <a href="../MEMO.md">MEMO.md</a>
+      <a href="sources.production.yml">sources.production.yml</a>
+    </div>
+  </footer>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════
+   Theme
+   ═══════════════════════════════════════════════════════════════════════ */
+(function(){
+  var k='gtmcdp-theme', s=null;
+  try{ s=localStorage.getItem(k); }catch(e){}
+  if(s) document.documentElement.setAttribute('data-theme', s);
+  document.getElementById('theme').addEventListener('click', function(){
+    var cur = document.documentElement.getAttribute('data-theme');
+    if(!cur) cur = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    var next = cur === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try{ localStorage.setItem(k, next); }catch(e){}
+    draw();
+  });
+})();
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Lineage graph — GENERATED, not hand-drawn.
+   Nodes, layers, the four CLEANSED passes and every edge below come out of
+   dbt's own target/manifest.json via docs/build_lineage.py, so the picture
+   cannot drift from the DAG dbt actually builds. Re-run after `dbt build`:
+       python docs/build_lineage.py
+   ═══════════════════════════════════════════════════════════════════════ */
+/* ==LINEAGE:BEGIN — generated by docs/build_lineage.py, do not edit== */
+/* dbt v1.12.4 · manifest schema v12.json · 59 nodes, 101 edges */
+var BUILD = {gen:"2026-09-14 05:46 UTC", dbt:"1.12.4", nodes:59, edges:101, delivered:18, introduced:41, source:21, raw:18, cleansed:12, unified:8};
+var N = [
+  {id:"raw_api_keys", col:"source", grp:"Product · delivered", neu:0, grain:"one per key", desc:"Hash only, plus a free-text name. Objects do not record which key made them."},
+  {id:"raw_cli_wizard", col:"source", grp:"Product · delivered", neu:0, grain:"wizard view", desc:"Fires in the BROWSER, not the CLI. Intent, never usage."},
+  {id:"raw_datasets", col:"source", grp:"Product · delivered", neu:0, grain:"one per dataset", desc:"metadata JSON only, and its source field is free text."},
+  {id:"raw_docs_mcp_events", col:"source", grp:"Product · delivered", neu:0, grain:"docs click", desc:"“Install / copy MCP command” clicks. Intent, never usage."},
+  {id:"raw_experiments", col:"source", grp:"Product · delivered", neu:0, grain:"one per experiment", desc:"repo_info + metadata as JSON text. The richest origin evidence in the dataset."},
+  {id:"raw_members", col:"source", grp:"Product · delivered", neu:0, grain:"user × org", desc:"Genuinely many-to-many, and one person spans two accounts."},
+  {id:"raw_organizations", col:"source", grp:"Product · delivered", neu:0, grain:"one per org", desc:"Carries the plan (Enterprise / Pro / Free), in mixed case."},
+  {id:"raw_projects", col:"source", grp:"Product · delivered", neu:0, grain:"one per project", desc:"Every project belongs to exactly one org — the safe attribution path."},
+  {id:"raw_prompts", col:"source", grp:"Product · delivered", neu:0, grain:"one per prompt", desc:"No metadata column at all, so origin is unknowable by construction."},
+  {id:"raw_segment_pages", col:"source", grp:"Product · delivered", neu:0, grain:"page view", desc:"user_id is null for anonymous traffic. The only deterministic UI signal."},
+  {id:"raw_trace_volume", col:"source", grp:"Product · delivered", neu:0, grain:"org × day GB", desc:"No user_id at this grain, so it can never be split across members."},
+  {id:"raw_users", col:"source", grp:"Product · delivered", neu:0, grain:"one per login", desc:"user_id + email. Nine rows, eight people."},
+  {id:"raw_account_org_map", col:"source", grp:"CRM · delivered", neu:0, grain:"org → account", desc:"Carries mapping_source, which is where the confidence comes from."},
+  {id:"raw_salesforce_accounts", col:"source", grp:"CRM · delivered", neu:0, grain:"one per account", desc:"Ten accounts. Domain and LinkedIn sometimes null; two share a domain."},
+  {id:"raw_news_events", col:"source", grp:"External · delivered", neu:0, grain:"one per news event", desc:"Vendor confidence 0.4–0.98. One headline names a different company than its key."},
+  {id:"raw_products", col:"source", grp:"External · delivered", neu:0, grain:"one per product", desc:"Overlaps the news feed: two launches appear in both."},
+  {id:"raw_signal_companies", col:"source", grp:"External · delivered", neu:0, grain:"one per company", desc:"No Salesforce id — only a messy website, a LinkedIn URL and a LinkedIn domain."},
+  {id:"raw_tech_detections", col:"source", grp:"External · delivered", neu:0, grain:"one per detection", desc:"Stack context, never a reason to call."},
+  {id:"ref_external_match_rules", col:"source", grp:"Rules · introduced", neu:1, grain:"one per match key", desc:"linkedin_slug 0.90 › website_domain 0.85 › linkedin_domain 0.75; company_name can_resolve = false."},
+  {id:"ref_org_mapping_sources", col:"source", grp:"Rules · introduced", neu:1, grain:"one per link type", desc:"contract 0.95 › billing_parent 0.85 › org_c_fallback 0.50."},
+  {id:"ref_surface_signals", col:"source", grp:"Rules · introduced", neu:1, grain:"one per signal", desc:"The surface catalogue: what each signal proves, what it cannot, and how confidently. Nine rows."},
+  {id:"stg_product__api_keys", col:"raw", grp:"Product", neu:1, grain:"1:1 with its seed", desc:"Typed 1:1 view: rename, cast, empty string → null. No business logic, so swapping the seed for a landed table is a one-line change."},
+  {id:"stg_product__cli_wizard", col:"raw", grp:"Product", neu:1, grain:"1:1 with its seed", desc:"Named to make the trap obvious: these are browser events, not CLI invocations."},
+  {id:"stg_product__datasets", col:"raw", grp:"Product", neu:1, grain:"1:1 with its seed", desc:"Parses metadata JSON into meta_source."},
+  {id:"stg_product__docs_mcp_events", col:"raw", grp:"Product", neu:1, grain:"1:1 with its seed", desc:"Typed 1:1 view: rename, cast, empty string → null. No business logic, so swapping the seed for a landed table is a one-line change."},
+  {id:"stg_product__experiments", col:"raw", grp:"Product", neu:1, grain:"1:1 with its seed", desc:"Parses repo_info and metadata JSON into ordinary columns — repo_is_dirty, repo_author_name, meta_ci_run_id — so no later layer touches JSON."},
+  {id:"stg_product__members", col:"raw", grp:"Product", neu:1, grain:"1:1 with its seed", desc:"Typed 1:1 view: rename, cast, empty string → null. No business logic, so swapping the seed for a landed table is a one-line change."},
+  {id:"stg_product__organizations", col:"raw", grp:"Product", neu:1, grain:"1:1 with its seed", desc:"Typed 1:1 view: rename, cast, empty string → null. No business logic, so swapping the seed for a landed table is a one-line change."},
+  {id:"stg_product__projects", col:"raw", grp:"Product", neu:1, grain:"1:1 with its seed", desc:"Typed 1:1 view: rename, cast, empty string → null. No business logic, so swapping the seed for a landed table is a one-line change."},
+  {id:"stg_product__prompts", col:"raw", grp:"Product", neu:1, grain:"1:1 with its seed", desc:"Typed 1:1 view: rename, cast, empty string → null. No business logic, so swapping the seed for a landed table is a one-line change."},
+  {id:"stg_product__segment_pages", col:"raw", grp:"Product", neu:1, grain:"1:1 with its seed", desc:"Typed 1:1 view: rename, cast, empty string → null. No business logic, so swapping the seed for a landed table is a one-line change."},
+  {id:"stg_product__trace_volume", col:"raw", grp:"Product", neu:1, grain:"1:1 with its seed", desc:"Typed org × day. The model comment states plainly that there is no user_id here."},
+  {id:"stg_product__users", col:"raw", grp:"Product", neu:1, grain:"1:1 with its seed", desc:"Typed 1:1 view: rename, cast, empty string → null. No business logic, so swapping the seed for a landed table is a one-line change."},
+  {id:"stg_crm__account_org_map", col:"raw", grp:"CRM", neu:1, grain:"1:1 with its seed", desc:"Typed 1:1 view: rename, cast, empty string → null. No business logic, so swapping the seed for a landed table is a one-line change."},
+  {id:"stg_crm__salesforce_accounts", col:"raw", grp:"CRM", neu:1, grain:"1:1 with its seed", desc:"Typed 1:1 view: rename, cast, empty string → null. No business logic, so swapping the seed for a landed table is a one-line change."},
+  {id:"stg_signals__companies", col:"raw", grp:"External", neu:1, grain:"1:1 with its seed", desc:"Types the three messy identifiers without touching them — normalisation belongs downstream, in one place."},
+  {id:"stg_signals__news_events", col:"raw", grp:"External", neu:1, grain:"1:1 with its seed", desc:"Typed 1:1 view: rename, cast, empty string → null. No business logic, so swapping the seed for a landed table is a one-line change."},
+  {id:"stg_signals__products", col:"raw", grp:"External", neu:1, grain:"1:1 with its seed", desc:"Typed 1:1 view: rename, cast, empty string → null. No business logic, so swapping the seed for a landed table is a one-line change."},
+  {id:"stg_signals__tech_detections", col:"raw", grp:"External", neu:1, grain:"1:1 with its seed", desc:"Typed 1:1 view: rename, cast, empty string → null. No business logic, so swapping the seed for a landed table is a one-line change."},
+  {id:"int_match_keys", col:"cleansed", grp:"1 · Make comparable", neu:1, grain:"one per matchable entity", desc:"THE normaliser. Every Salesforce account and every external company go through the same CTEs, so a key built from the CRM and a key built from the vendor feed can never drift apart. Decides nothing."},
+  {id:"int_org_account_resolution", col:"cleansed", grp:"1 · Make comparable", neu:1, grain:"one per org", desc:"Which account an org rolls up to, and how much to trust it. The rule seed turns the link type into a confidence; two candidate accounts means none."},
+  {id:"int_org_trace_trend", col:"cleansed", grp:"1 · Make comparable", neu:1, grain:"one per org", desc:"Seven-day volume ending on the as-of date, and growth against the day before that window. Org level, because there is no user column to split it by."},
+  {id:"int_user_identity", col:"cleansed", grp:"1 · Make comparable", neu:1, grain:"one per login", desc:"Which logins are the same person. Exact, case-insensitive email only — both ids kept, one flagged secondary. Nothing fuzzier is merged."},
+  {id:"int_account_trace_trend", col:"cleansed", grp:"2 · Relate", neu:1, grain:"one per account", desc:"Rolls org traces up to the account and owns the definition of “trace growth”. Three marts read it instead of each recomputing the ratio."},
+  {id:"int_api_keys", col:"cleansed", grp:"2 · Relate", neu:1, grain:"one per API key", desc:"Whose key it is, plus the free-text name hints (ci-service, dave-cli) that stay hints and never become evidence of usage."},
+  {id:"int_memberships", col:"cleansed", grp:"2 · Relate", neu:1, grain:"person × org", desc:"Collapses a person’s duplicate logins into one membership row and carries the org’s account resolution with it."},
+  {id:"int_signal_company_match_candidates", col:"cleansed", grp:"2 · Relate", neu:1, grain:"company × method × account", desc:"Every possible link, one row per key that matched. Deliberately refuses to choose — that is the next model’s job."},
+  {id:"int_member_account_resolution", col:"cleansed", grp:"3 · Decide", neu:1, grain:"one per person", desc:"One account per person, and only if all their orgs agree. Frank spans Globex and Umbrella, so he gets none and is marked ambiguous."},
+  {id:"int_signal_company_resolution", col:"cleansed", grp:"3 · Decide", neu:1, grain:"one per external company", desc:"The CDP core. Precedence picks a winner, every other key must agree, a name can only object. Outcome is resolved / conflict / ambiguous / unmatched / no_identifiers — never a guess."},
+  {id:"int_external_signals", col:"cleansed", grp:"4 · Classify", neu:1, grain:"one per signal", desc:"News, products and tech as one stream. Cross-feed duplicates merged and marked corroborated; a headline naming a different company is flagged and never actionable."},
+  {id:"int_product_activity", col:"cleansed", grp:"4 · Classify", neu:1, grain:"one per activity", desc:"Every object, page view, wizard view, docs click and CLI-named key becomes one row carrying surface, usage-or-intent, attribution class, confidence and human-or-automation."},
+  {id:"fct_account_signals", col:"unified", grp:"Facts", neu:1, grain:"one per signal", desc:"The extension point: product and external signals in one shape. A new source is one more union branch."},
+  {id:"fct_account_surface_adoption", col:"unified", grp:"Facts", neu:1, grain:"account × surface", desc:"The rollup, with known_members as the denominator — product members, not headcount. evidence_level says whether the proof is member-level or only org-level."},
+  {id:"fct_member_surface_activity", col:"unified", grp:"Facts", neu:1, grain:"person × surface", desc:"Every person gets a row for every surface, so “no evidence” is an explicit answer. Two status columns: evidence_status (anyone) and human_evidence_status (the person, automation excluded)."},
+  {id:"dim_members", col:"unified", grp:"Dimensions", neu:1, grain:"one per person", desc:"Who they are, which account, member type, evidence per surface. The *_evidence columns count people only."},
+  {id:"dim_signal_companies", col:"unified", grp:"Dimensions", neu:1, grain:"one per external company", desc:"Every company, resolved or not, with its evidence and its next_action."},
+  {id:"account_360", col:"unified", grp:"Reports", neu:1, grain:"one per Salesforce account", desc:"The rep view: who they are, how they use the product, what has happened lately, and ranked plain-English reasons to call."},
+  {id:"net_new_prospects", col:"unified", grp:"Reports", neu:1, grain:"one per prospect", desc:"Unmatched external companies plus product sign-ups with no CRM account. An output, not an error."},
+  {id:"rpt_resolution_quality", col:"unified", grp:"Reports", neu:1, grain:"one per metric", desc:"Nineteen resolution metrics recomputed every run, so drift is visible the moment an upstream feed changes."},
+];
+var E = [
+  ["dim_signal_companies","net_new_prospects"],
+  ["fct_account_signals","account_360"],
+  ["fct_account_surface_adoption","account_360"],
+  ["fct_member_surface_activity","dim_members"],
+  ["int_account_trace_trend","account_360"],
+  ["int_account_trace_trend","fct_account_signals"],
+  ["int_account_trace_trend","fct_account_surface_adoption"],
+  ["int_api_keys","dim_members"],
+  ["int_api_keys","int_product_activity"],
+  ["int_external_signals","account_360"],
+  ["int_external_signals","dim_signal_companies"],
+  ["int_external_signals","fct_account_signals"],
+  ["int_external_signals","net_new_prospects"],
+  ["int_external_signals","rpt_resolution_quality"],
+  ["int_match_keys","account_360"],
+  ["int_match_keys","dim_signal_companies"],
+  ["int_match_keys","fct_account_signals"],
+  ["int_match_keys","fct_account_surface_adoption"],
+  ["int_match_keys","int_external_signals"],
+  ["int_match_keys","int_signal_company_match_candidates"],
+  ["int_match_keys","int_signal_company_resolution"],
+  ["int_match_keys","rpt_resolution_quality"],
+  ["int_member_account_resolution","account_360"],
+  ["int_member_account_resolution","dim_members"],
+  ["int_member_account_resolution","fct_member_surface_activity"],
+  ["int_member_account_resolution","int_product_activity"],
+  ["int_member_account_resolution","net_new_prospects"],
+  ["int_member_account_resolution","rpt_resolution_quality"],
+  ["int_memberships","account_360"],
+  ["int_memberships","fct_account_surface_adoption"],
+  ["int_memberships","int_member_account_resolution"],
+  ["int_memberships","net_new_prospects"],
+  ["int_org_account_resolution","account_360"],
+  ["int_org_account_resolution","fct_account_signals"],
+  ["int_org_account_resolution","int_account_trace_trend"],
+  ["int_org_account_resolution","int_memberships"],
+  ["int_org_account_resolution","int_product_activity"],
+  ["int_org_account_resolution","net_new_prospects"],
+  ["int_org_account_resolution","rpt_resolution_quality"],
+  ["int_org_trace_trend","int_account_trace_trend"],
+  ["int_product_activity","account_360"],
+  ["int_product_activity","fct_account_signals"],
+  ["int_product_activity","fct_account_surface_adoption"],
+  ["int_product_activity","fct_member_surface_activity"],
+  ["int_product_activity","net_new_prospects"],
+  ["int_product_activity","rpt_resolution_quality"],
+  ["int_signal_company_match_candidates","account_360"],
+  ["int_signal_company_match_candidates","int_signal_company_resolution"],
+  ["int_signal_company_resolution","account_360"],
+  ["int_signal_company_resolution","dim_signal_companies"],
+  ["int_signal_company_resolution","int_external_signals"],
+  ["int_signal_company_resolution","rpt_resolution_quality"],
+  ["int_user_identity","int_api_keys"],
+  ["int_user_identity","int_member_account_resolution"],
+  ["int_user_identity","int_memberships"],
+  ["int_user_identity","int_product_activity"],
+  ["int_user_identity","rpt_resolution_quality"],
+  ["raw_account_org_map","stg_crm__account_org_map"],
+  ["raw_api_keys","stg_product__api_keys"],
+  ["raw_cli_wizard","stg_product__cli_wizard"],
+  ["raw_datasets","stg_product__datasets"],
+  ["raw_docs_mcp_events","stg_product__docs_mcp_events"],
+  ["raw_experiments","stg_product__experiments"],
+  ["raw_members","stg_product__members"],
+  ["raw_news_events","stg_signals__news_events"],
+  ["raw_organizations","stg_product__organizations"],
+  ["raw_products","stg_signals__products"],
+  ["raw_projects","stg_product__projects"],
+  ["raw_prompts","stg_product__prompts"],
+  ["raw_salesforce_accounts","stg_crm__salesforce_accounts"],
+  ["raw_segment_pages","stg_product__segment_pages"],
+  ["raw_signal_companies","stg_signals__companies"],
+  ["raw_tech_detections","stg_signals__tech_detections"],
+  ["raw_trace_volume","stg_product__trace_volume"],
+  ["raw_users","stg_product__users"],
+  ["ref_external_match_rules","int_signal_company_match_candidates"],
+  ["ref_org_mapping_sources","int_org_account_resolution"],
+  ["ref_surface_signals","fct_account_signals"],
+  ["ref_surface_signals","fct_account_surface_adoption"],
+  ["ref_surface_signals","int_product_activity"],
+  ["stg_crm__account_org_map","int_org_account_resolution"],
+  ["stg_crm__salesforce_accounts","int_match_keys"],
+  ["stg_crm__salesforce_accounts","int_org_account_resolution"],
+  ["stg_product__api_keys","int_api_keys"],
+  ["stg_product__cli_wizard","int_product_activity"],
+  ["stg_product__datasets","int_product_activity"],
+  ["stg_product__docs_mcp_events","int_product_activity"],
+  ["stg_product__experiments","int_product_activity"],
+  ["stg_product__members","int_memberships"],
+  ["stg_product__organizations","int_org_account_resolution"],
+  ["stg_product__projects","int_product_activity"],
+  ["stg_product__prompts","int_product_activity"],
+  ["stg_product__segment_pages","int_product_activity"],
+  ["stg_product__segment_pages","rpt_resolution_quality"],
+  ["stg_product__trace_volume","int_org_trace_trend"],
+  ["stg_product__users","int_user_identity"],
+  ["stg_signals__companies","int_external_signals"],
+  ["stg_signals__companies","int_match_keys"],
+  ["stg_signals__news_events","int_external_signals"],
+  ["stg_signals__products","int_external_signals"],
+  ["stg_signals__tech_detections","int_external_signals"],
+];
+/* ==LINEAGE:END== */
+
+var byId = {}; N.forEach(function(x){ byId[x.id] = x; });
+var up = {}, dn = {};
+E.forEach(function(e){ (dn[e[0]]=dn[e[0]]||[]).push(e[1]); (up[e[1]]=up[e[1]]||[]).push(e[0]); });
+
+/* ── render columns ───────────────────────────────────────────────────── */
+var COLS = [
+  {k:'source',   t:'Source',   m:'seeds',  c:BUILD.delivered + ' delivered + ' + (BUILD.source - BUILD.delivered) + ' new'},
+  {k:'raw',      t:'Raw',      m:'views',  c:BUILD.raw + ' new'},
+  {k:'cleansed', t:'Cleansed', m:'tables', c:BUILD.cleansed + ' new'},
+  {k:'unified',  t:'Unified',  m:'views',  c:BUILD.unified + ' new'}
+];
+var grid = document.getElementById('grid');
+COLS.forEach(function(col){
+  var d = document.createElement('div');
+  d.className = 'col ' + col.k;
+  var h = '<div class="col-h"><span class="n">'+col.t+'</span><span class="m">'+col.m+'</span><span class="c">'+col.c+'</span></div><div class="col-bar"></div>';
+  var seen = {};
+  N.filter(function(x){ return x.col === col.k; }).forEach(function(x){
+    if(!seen[x.grp]){
+      seen[x.grp] = 1;
+      h += '<div class="grp'+(x.neu?'':' d-only')+'">'+x.grp+'</div>';
+    }
+    h += '<button class="node '+(x.neu?'is-new':'delivered')+'" data-id="'+x.id+'">'
+       +   '<span class="nm">'+x.id+'</span><span class="gr">'+x.grain+'</span>'
+       + '</button>';
+  });
+  d.innerHTML = h;
+  grid.appendChild(d);
+});
+
+/* ── edges + selection ────────────────────────────────────────────────── */
+var svg = document.getElementById('edges');
+var lin = document.getElementById('lin');
+var panel = document.getElementById('panel');
+var selected = null, presetSet = null;
+
+function closure(id){
+  var s = {}; s[id] = 1;
+  (function upW(x){ (up[x]||[]).forEach(function(p){ if(!s[p]){ s[p]=1; upW(p);} }); })(id);
+  (function dnW(x){ (dn[x]||[]).forEach(function(c){ if(!s[c]){ s[c]=1; dnW(c);} }); })(id);
+  return s;
+}
+/* presets trace UPSTREAM only: "what feeds this", not "and everything it
+   also touches" — otherwise account_360 drags the whole graph into view. */
+function ancestors(id){
+  var s = {}; s[id] = 1;
+  (function w(x){ (up[x]||[]).forEach(function(p){ if(!s[p]){ s[p]=1; w(p);} }); })(id);
+  return s;
+}
+function unionAncestors(ids){
+  var s = {};
+  ids.forEach(function(i){ var c = ancestors(i); Object.keys(c).forEach(function(k){ s[k]=1; }); });
+  return s;
+}
+
+function activeSet(){
+  if(selected) return closure(selected);
+  if(presetSet) return presetSet;
+  return null;
+}
+
+function draw(){
+  svg.innerHTML = '';
+  var set = activeSet();
+  if(window.innerWidth < 900) return;
+  var ambient = !set;
+  var box = grid.getBoundingClientRect();
+  var stroke = getComputedStyle(document.documentElement).getPropertyValue('--clean').trim() || '#1F4FD8';
+  var frag = '';
+  E.forEach(function(e){
+    if(!ambient && (!set[e[0]] || !set[e[1]])) return;
+    var a = grid.querySelector('[data-id="'+e[0]+'"]');
+    var b = grid.querySelector('[data-id="'+e[1]+'"]');
+    if(!a || !b) return;
+    var ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+    var x1 = ra.right - box.left, y1 = ra.top - box.top + ra.height/2;
+    var x2 = rb.left  - box.left, y2 = rb.top - box.top + rb.height/2;
+    var mx = (x1 + x2) / 2;
+    var strong = (e[0] === selected || e[1] === selected);
+    var op = ambient ? 0.13 : (strong ? 0.85 : 0.34);
+    frag += '<path d="M'+x1+' '+y1+' C'+mx+' '+y1+' '+mx+' '+y2+' '+x2+' '+y2+'" fill="none" stroke="'+stroke+'" '
+          + 'stroke-width="'+(strong?1.6:1)+'" opacity="'+op+'" stroke-linecap="round"/>';
+  });
+  svg.innerHTML = frag;
+}
+
+function paint(){
+  var set = activeSet();
+  lin.classList.toggle('has-sel', !!set);
+  grid.querySelectorAll('.node').forEach(function(el){
+    var id = el.getAttribute('data-id');
+    el.classList.toggle('act', !!(set && set[id]));
+    el.classList.toggle('sel', id === selected);
+  });
+  renderPanel();
+  draw();
+}
+
+function listOf(ids){
+  if(!ids || !ids.length) return '<span style="color:var(--ink-3)">—</span>';
+  return ids.map(function(i){ return '<code>'+i+'</code>'; }).join(' ');
+}
+
+function renderPanel(){
+  if(!selected){
+    panel.innerHTML = '<div class="lp-empty">Select a node to see its grain, what it reads, what it decides, and who reads it.</div>';
+    return;
+  }
+  var x = byId[selected];
+  var layerTag = {source:'t-seed', raw:'t-raw', cleansed:'t-clean', unified:'t-uni'}[x.col];
+  var layerName = {source:'Seed', raw:'Raw', cleansed:'Cleansed', unified:'Unified'}[x.col];
+  panel.innerHTML =
+    '<div class="lp-head">'
+    + '<h4>'+x.id+'</h4>'
+    + '<span class="tag '+layerTag+'">'+layerName+'</span>'
+    + (x.neu ? '<span class="tag t-new">Introduced here</span>' : '<span class="tag t-seed">Delivered with the brief</span>')
+    + '<span style="margin-left:auto; font-size:12px; color:var(--ink-3)">grain: '+x.grain+'</span>'
+    + '</div>'
+    + '<div class="lp-desc">'+x.desc+'</div>'
+    + '<div class="lp-meta">'
+    +   '<div><span class="k">Reads</span><span class="v">'+listOf(up[x.id])+'</span></div>'
+    +   '<div><span class="k">Read by</span><span class="v">'+listOf(dn[x.id])+'</span></div>'
+    + '</div>';
+}
+
+grid.addEventListener('click', function(ev){
+  var b = ev.target.closest('.node');
+  if(!b) return;
+  var id = b.getAttribute('data-id');
+  selected = (selected === id) ? null : id;
+  if(selected){ presetSet = null; setPreset('none', true); }
+  paint();
+});
+
+var PRESETS = {
+  none:     null,
+  identity: ['int_member_account_resolution'],
+  external: ['dim_signal_companies'],
+  surface:  ['fct_account_surface_adoption','fct_member_surface_activity'],
+  rep:      ['account_360']
+};
+function setPreset(key, chipsOnly){
+  document.querySelectorAll('[data-preset]').forEach(function(c){
+    c.classList.toggle('on', c.getAttribute('data-preset') === key);
+  });
+  if(chipsOnly) return;
+  selected = null;
+  presetSet = PRESETS[key] ? unionAncestors(PRESETS[key]) : null;
+  paint();
+}
+document.querySelectorAll('[data-preset]').forEach(function(c){
+  c.addEventListener('click', function(){ setPreset(c.getAttribute('data-preset')); });
+});
+document.getElementById('onlyNew').addEventListener('click', function(){
+  this.classList.toggle('on');
+  lin.classList.toggle('hide-delivered');
+  this.textContent = lin.classList.contains('hide-delivered') ? 'Show delivered seeds' : 'Hide delivered seeds';
+  requestAnimationFrame(draw);
+});
+addEventListener('resize', function(){ clearTimeout(window.__rt); window.__rt = setTimeout(draw, 90); });
+paint();
+
+/* every count on the page comes from the same generated BUILD object */
+document.getElementById('buildstamp').textContent =
+  '· ' + BUILD.nodes + ' nodes, ' + BUILD.edges + ' edges, dbt ' + BUILD.dbt + ', generated ' + BUILD.gen + '.';
+document.querySelectorAll('[data-count]').forEach(function(el){
+  el.textContent = BUILD[el.getAttribute('data-count')];
+});
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Surface signal explorer
+   ═══════════════════════════════════════════════════════════════════════ */
+var SIG = [
+ {c:'ui_page_view', s:'ui', k:'usage', a:'deterministic', v:0.95,
+  col:'raw_segment_pages.user_id, path',
+  can:'A logged-in person loaded a page of the web app.',
+  cant:'Which org they were working in; whether the page view created anything.'},
+ {c:'code_repo_info', s:'sdk', k:'usage', a:'deterministic', v:0.90,
+  col:'raw_experiments.repo_info',
+  can:'The object was logged from code running inside a git repo — i.e. through the SDK.',
+  cant:'Whether the SDK was called directly or via the CLI. The CLI eval runner wraps the SDK, so nothing separates them.'},
+ {c:'code_ci_run', s:'sdk', k:'usage', a:'deterministic', v:0.90,
+  col:'metadata.ci_run_id / ci / source, repo_info.author_name, raw_datasets.metadata.source',
+  can:'The object came from an automated CI job through the SDK.',
+  cant:'Which human set it up. The user_id is just the owner of the key CI used.'},
+ {c:'code_runtime_source', s:'sdk', k:'usage', a:'heuristic', v:0.60,
+  col:'raw_experiments.metadata.source (e.g. lambda-prod)',
+  can:'A server-side process tagged its own source, which only code can do.',
+  cant:'That the tag is standardised — it is free text written by the customer.'},
+ {c:'object_origin_unknown', s:'unknown', k:'usage', a:'none', v:0.00,
+  col:'experiments / datasets / prompts with no repo_info and no source tag',
+  can:'A person or key created something in this project.',
+  cant:'Whether it was made in the UI or by the SDK outside a git repo. 12 of 31 objects land here — recorded unknown, never guessed as UI.'},
+ {c:'cli_setup_wizard', s:'cli', k:'intent', a:'heuristic', v:0.30,
+  col:'raw_cli_wizard.user_id',
+  can:'The person opened the CLI setup wizard in the browser.',
+  cant:'That the CLI was ever installed, let alone run.'},
+ {c:'cli_key_name_hint', s:'cli', k:'intent', a:'heuristic', v:0.20,
+  col:'raw_api_keys.name containing "cli"',
+  can:'The person named an API key after the CLI.',
+  cant:'Anything. Key names are free text.'},
+ {c:'mcp_docs_click', s:'mcp', k:'intent', a:'heuristic', v:0.30,
+  col:'raw_docs_mcp_events.action',
+  can:'The person copied or clicked the MCP install command in the docs.',
+  cant:'That an MCP client ever connected or made a call.'},
+ {c:'org_trace_ingestion', s:'sdk', k:'usage', a:'deterministic', v:0.85,
+  col:'raw_trace_volume.ingested_gb (org × day)',
+  can:'The org is sending production traces programmatically.',
+  cant:'Which member, key or surface sent them — there is no user_id at this grain.'}
+];
+(function(){
+  var list = document.getElementById('sigList'), body = document.getElementById('sigBody');
+  var aTag = {deterministic:'t-ok', heuristic:'t-warn', none:'t-stop'};
+  list.innerHTML = SIG.map(function(x,i){
+    return '<button data-i="'+i+'"'+(i===0?' class="on"':'')+'>'+x.c
+         + '<span class="st"><span class="tag '+aTag[x.a]+'" style="font-size:9.5px">'+x.a+'</span> '
+         + '<span style="color:var(--ink-3)">'+x.s.toUpperCase()+' · '+x.k+'</span></span></button>';
+  }).join('');
+  function show(i){
+    var x = SIG[i];
+    body.innerHTML =
+      '<div class="lp-head"><h4>'+x.c+'</h4>'
+      + '<span class="tag '+aTag[x.a]+'">'+x.a+'</span>'
+      + '<span class="tag '+(x.k==='usage'?'t-clean':'t-uni')+'">'+x.k+'</span>'
+      + '<span style="margin-left:auto;font:600 13px var(--mono)">confidence '+x.v.toFixed(2)+'</span></div>'
+      + '<dl class="kv">'
+      +  '<dt>Surface</dt><dd><strong style="color:var(--ink)">'+x.s.toUpperCase()+'</strong></dd>'
+      +  '<dt>Source columns</dt><dd><code style="white-space:normal">'+x.col+'</code></dd>'
+      +  '<dt>What it proves</dt><dd>'+x.can+'</dd>'
+      +  '<dt>What it cannot</dt><dd style="color:var(--stop)">'+x.cant+'</dd>'
+      + '</dl>';
+    list.querySelectorAll('button').forEach(function(b){ b.classList.toggle('on', +b.dataset.i === i); });
+  }
+  list.addEventListener('click', function(e){ var b = e.target.closest('button'); if(b) show(+b.dataset.i); });
+  show(0);
+})();
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Resolution explorer
+   ═══════════════════════════════════════════════════════════════════════ */
+var CO = [
+ {id:'sc01', nm:'Acme Corporation', web:'https://www.acme.com/', li:'https://www.linkedin.com/company/acme-corp', lid:'acme.com',
+  keys:[['linkedin_slug','acme-corp','ACC001 Acme Corp','unique'],['website_domain','acme.com','ACC001 Acme Corp','unique'],['linkedin_domain','acme.com','ACC001 Acme Corp','unique']],
+  st:'resolved', acc:'ACC001 Acme Corp', via:'linkedin_slug', conf:'0.95', act:'attach_to_account',
+  why:'All three keys agree, and two of them are independent values (acme-corp and acme.com), so 0.90 becomes 0.95. The name agrees too, though it was never allowed to vote.'},
+ {id:'sc02', nm:'Globex', web:'http://globex.io/products', li:'https://www.linkedin.com/company/globex-industries', lid:'—',
+  keys:[['linkedin_slug','globex-industries','ACC002 Globex','unique'],['website_domain','globex.io','no account','—']],
+  st:'resolved', acc:'ACC002 Globex', via:'linkedin_slug', conf:'0.90', act:'attach_to_account',
+  why:'LinkedIn is the only key that can decide: the CRM account has no domain at all, so globex.io matches nothing. One key, no corroboration bonus.'},
+ {id:'sc03', nm:'Initech LLC', web:'https://Initech.com', li:'https://www.linkedin.com/company/initech-software', lid:'initech.com',
+  keys:[['linkedin_slug','initech-software','no account','—'],['website_domain','initech.com','ACC003 Initech','unique'],['linkedin_domain','initech.com','ACC003 Initech','unique']],
+  st:'resolved', acc:'ACC003 Initech', via:'website_domain', conf:'0.85', act:'attach_to_account',
+  why:'The account has no LinkedIn, so domain decides. initech.com appears in two vendor fields but it is one value, so it counts once — no corroboration bonus. That distinction is deliberate.'},
+ {id:'sc04', nm:'Umbrella', web:'https://umbrella.co/', li:'https://linkedin.com/company/umbrella-labs', lid:'umbrella.co',
+  keys:[['linkedin_slug','umbrella-labs','ACC004 Umbrella Labs','unique'],['website_domain','umbrella.co','ACC004 Umbrella Labs','unique'],['linkedin_domain','umbrella.co','ACC004 Umbrella Labs','unique']],
+  st:'resolved', acc:'ACC004 Umbrella Labs', via:'linkedin_slug', conf:'0.95', act:'attach_to_account',
+  why:'Everything agrees. LinkedIn without www normalises to the same slug as LinkedIn with it.'},
+ {id:'sc05', nm:'Hooli Inc', web:'https://www.hooli.com', li:'https://www.linkedin.com/company/hooli-xyz', lid:'hooli.com',
+  keys:[['linkedin_slug','hooli-xyz','ACC007 Hooli XYZ','unique'],['website_domain','hooli.com','ACC006 + ACC007','shared — cannot decide'],['linkedin_domain','hooli.com','ACC006 + ACC007','shared — cannot decide'],['company_name','hooli','ACC006 Hooli','contradicts']],
+  st:'resolved · held', acc:'ACC007 Hooli XYZ', via:'linkedin_slug', conf:'0.70', act:'confirm_match',
+  why:'The case that settled the name rule. Everything about “Hooli Inc” reads like the parent company except the one identifier that is actually unique to a legal entity. The LinkedIn slug decides, the contradicting name costs 0.20, and the match is parked — its three signals never reach a rep until a steward confirms.'},
+ {id:'sc06', nm:'Hooli', web:'https://hooli.com', li:'https://www.linkedin.com/company/hooli', lid:'hooli.com',
+  keys:[['linkedin_slug','hooli','ACC006 Hooli','unique'],['website_domain','hooli.com','ACC006 + ACC007','shared — cannot decide'],['linkedin_domain','hooli.com','ACC006 + ACC007','shared — cannot decide']],
+  st:'resolved', acc:'ACC006 Hooli', via:'linkedin_slug', conf:'0.90', act:'attach_to_account',
+  why:'A shared key can support a match but never decide one. Only the slug is unique, so 0.90 with no bonus — exactly why LinkedIn outranks domain in the precedence order.'},
+ {id:'sc07', nm:'Stark Industries', web:'—', li:'—', lid:'—',
+  keys:[['company_name','starkindustries','ACC008 Stark Industries','suggestion only']],
+  st:'no_identifiers', acc:'none', via:'—', conf:'—', act:'steward_review',
+  why:'Nothing to match on. The name points squarely at ACC008 — which is exactly why it goes to a human instead of being merged. It is also not a net-new prospect: an account almost certainly already exists.'},
+ {id:'sc08', nm:'Wayne Enterprises Inc.', web:'https://wayne-enterprises.com', li:'https://www.linkedin.com/company/wayne-ent', lid:'wayne.com',
+  keys:[['linkedin_slug','wayne-ent','ACC009 Wayne Enterprises','unique'],['website_domain','wayne-enterprises.com','no account','—'],['linkedin_domain','wayne.com','ACC009 Wayne Enterprises','unique']],
+  st:'resolved', acc:'ACC009 Wayne Enterprises', via:'linkedin_slug', conf:'0.95', act:'attach_to_account',
+  why:'The vendor website differs from the CRM domain but claims no other account, so it cannot contradict. Two independent keys agree → 0.95.'},
+ {id:'sc09', nm:'PiedPiper', web:'https://piedpiper.com/?utm_source=news', li:'https://www.linkedin.com/company/pied-piper/', lid:'piedpiper.com',
+  keys:[['linkedin_slug','pied-piper','ACC010 Pied Piper','unique'],['website_domain','piedpiper.com','ACC010 Pied Piper','unique'],['linkedin_domain','piedpiper.com','ACC010 Pied Piper','unique']],
+  st:'resolved', acc:'ACC010 Pied Piper', via:'linkedin_slug', conf:'0.95', act:'attach_to_account',
+  why:'The ?utm_source and the trailing slash normalise away. “PiedPiper” and “Pied Piper” also produce the same name key — but the name was never needed.'},
+ {id:'sc10', nm:'Prospect AI', web:'https://prospect-ai.com', li:'https://www.linkedin.com/company/prospect-ai', lid:'prospect-ai.com',
+  keys:[['linkedin_slug','prospect-ai','no account','—'],['website_domain','prospect-ai.com','no account','—'],['linkedin_domain','prospect-ai.com','no account','—']],
+  st:'unmatched', acc:'none', via:'—', conf:'—', act:'net_new_prospect',
+  why:'Clean keys, no account. Nothing is wrong here — this is the CDP producing a net-new prospect, with three signals attached including a seed round.'},
+ {id:'sc11', nm:'Acme (dup record)', web:'https://acme.com', li:'https://www.linkedin.com/company/pied-piper', lid:'—',
+  keys:[['website_domain','acme.com','ACC001 Acme Corp','unique'],['linkedin_slug','pied-piper','ACC010 Pied Piper','unique']],
+  st:'conflict', acc:'none', via:'—', conf:'—', act:'steward_review',
+  why:'Two unique keys pointing at two different accounts. The higher-precedence key would have won on its own — the agreement rule is what stops it. No account is assigned, and it shows as a pending record on both ACC001 and ACC010.'}
+];
+(function(){
+  var list = document.getElementById('coList'), body = document.getElementById('coBody');
+  var stTag = function(s){
+    if(s.indexOf('held')>-1) return 't-warn';
+    if(s==='resolved') return 't-ok';
+    if(s==='conflict') return 't-stop';
+    return 't-warn';
+  };
+  list.innerHTML = CO.map(function(x,i){
+    return '<button data-i="'+i+'"'+(i===0?' class="on"':'')+'>'+x.id+' · '+x.nm
+         + '<span class="st"><span class="tag '+stTag(x.st)+'" style="font-size:9.5px">'+x.st+'</span></span></button>';
+  }).join('');
+  function show(i){
+    var x = CO[i];
+    var rows = x.keys.map(function(k){
+      var bad = /shared|contradicts|no account|suggestion/.test(k[3]+k[2]);
+      return '<div class="keyrow"><span class="m">'+k[0]+'</span><span class="v">'+k[1]+'</span>'
+           + '<span class="o"><span style="color:var(--ink-2)">→ '+k[2]+'</span> '
+           + (k[3]==='—' ? '' : '<span class="tag '+(bad?'t-warn':'t-ok')+'">'+k[3]+'</span>')
+           + '</span></div>';
+    }).join('');
+    body.innerHTML =
+      '<div class="lp-head"><h4>'+x.id+' · '+x.nm+'</h4><span class="tag '+stTag(x.st)+'">'+x.st+'</span>'
+      + '<span class="tag t-clean">'+x.act+'</span></div>'
+      + '<dl class="kv">'
+      +  '<dt>As delivered</dt><dd style="font:12px var(--mono); color:var(--ink-3); line-height:1.9">'
+      +   x.web+'<br>'+x.li+'<br>'+x.lid+'</dd>'
+      + '</dl>'
+      + '<div style="font:600 10.5px var(--mono); letter-spacing:.07em; text-transform:uppercase; color:var(--ink-3); margin:16px 0 4px">Keys, and what each pointed at</div>'
+      + rows
+      + '<div style="display:flex; flex-wrap:wrap; gap:22px; margin:16px 0 12px; padding:12px 0; border-top:1px solid var(--line); border-bottom:1px solid var(--line)">'
+      +  '<div><span style="font:600 10px var(--mono); letter-spacing:.07em; text-transform:uppercase; color:var(--ink-3); display:block">Account</span><strong>'+x.acc+'</strong></div>'
+      +  '<div><span style="font:600 10px var(--mono); letter-spacing:.07em; text-transform:uppercase; color:var(--ink-3); display:block">Decided by</span><strong>'+x.via+'</strong></div>'
+      +  '<div><span style="font:600 10px var(--mono); letter-spacing:.07em; text-transform:uppercase; color:var(--ink-3); display:block">Confidence</span><strong>'+x.conf+'</strong></div>'
+      + '</div>'
+      + '<p style="font-size:13.5px; color:var(--ink-2); margin:0">'+x.why+'</p>';
+    list.querySelectorAll('button').forEach(function(b){ b.classList.toggle('on', +b.dataset.i === i); });
+  }
+  list.addEventListener('click', function(e){ var b = e.target.closest('button'); if(b) show(+b.dataset.i); });
+  show(0);
+})();
+
+/* ═══════════════════════════════════════════════════════════════════════
+   account_360, real output
+   ═══════════════════════════════════════════════════════════════════════ */
+var A360 = [
+ [1,'ACC002','Globex','pro',3,'usage_proven','usage_proven','intent_only','intent_only',
+  'Trace ingestion up 41% in 7 days (12.0 → 16.9 GB/day) on a non-Enterprise plan | Globex expands to EU | 2 member(s) exploring CLI, MCP setup (intent, not proven usage)'],
+ [2,'ACC001','Acme Corp','enterprise',3,'usage_proven','usage_proven','not_measurable','intent_only',
+  'Acme acquires a small analytics startup | Acme launches Acme Copilot | 1 member(s) exploring MCP setup (intent, not proven usage)'],
+ [3,'ACC004','Umbrella Labs','pro',1,'no_evidence','usage_proven','not_measurable','not_measurable',
+  'Trace ingestion up 327% in 7 days (1.5 → 6.4 GB/day) on a non-Enterprise plan'],
+ [4,'ACC006','Hooli','—',0,'no_evidence','no_evidence','not_measurable','not_measurable',
+  'Hooli partners with a cloud vendor'],
+ [5,'ACC010','Pied Piper','—',0,'no_evidence','no_evidence','not_measurable','not_measurable',
+  'Pied Piper launches new compression API'],
+ [6,'ACC003','Initech','pro',1,'usage_proven','usage_proven <span class="tag t-warn" style="font-size:9px">org-level</span>','not_measurable','not_measurable',
+  '<span style="color:var(--ink-3)">nothing actionable — the +163% surge is held: the org link is a 0.50 fallback</span>'],
+ [7,'ACC005','Soylent Corp','—',0,'no_evidence','no_evidence','not_measurable','not_measurable','<span style="color:var(--ink-3)">no product or external footprint</span>'],
+ [8,'ACC007','Hooli XYZ','—',0,'no_evidence','no_evidence','not_measurable','not_measurable','<span style="color:var(--ink-3)">3 signals held for review — the matched record’s name says “Hooli”</span>'],
+ [9,'ACC008','Stark Industries','—',0,'no_evidence','no_evidence','not_measurable','not_measurable','<span style="color:var(--ink-3)">1 external record pending review — no identifiers to match on</span>'],
+ [10,'ACC009','Wayne Enterprises','—',0,'no_evidence','no_evidence','not_measurable','not_measurable','<span style="color:var(--ink-3)">1 signal held: the headline names a different company</span>']
+];
+(function(){
+  var cls = function(v){
+    if(v.indexOf('usage_proven')===0) return 't-ok';
+    if(v.indexOf('intent_only')===0) return 't-uni';
+    if(v.indexOf('not_measurable')===0) return 't-stop';
+    return 't-seed';
+  };
+  document.getElementById('a360').innerHTML = A360.map(function(r){
+    return '<tr><td><strong>'+r[0]+'</strong></td><td><strong>'+r[2]+'</strong><br><small style="color:var(--ink-3)">'+r[1]+'</small></td>'
+      + '<td>'+r[3]+'</td><td>'+r[4]+'</td>'
+      + [5,6,7,8].map(function(i){
+          var base = r[i].split(' ')[0];
+          return '<td><span class="tag '+cls(r[i])+'">'+base.replace(/_/g,' ')+'</span>'
+               + (r[i].indexOf('<span')>-1 ? '<br>'+r[i].slice(r[i].indexOf('<span')) : '')+'</td>';
+        }).join('')
+      + '<td style="font-size:12.5px; min-width:300px">'+r[9]+'</td></tr>';
+  }).join('');
+})();
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Data issues
+   ═══════════════════════════════════════════════════════════════════════ */
+var ISSUES = [
+ ['raw_users','<code>u_grace</code> and <code>u_grace_dup</code> share <code>grace@acme.com</code>','Merged to one person, both ids kept',1],
+ ['raw_members','<code>u_frank</code> is in Globex (ACC002) <strong>and</strong> Umbrella (ACC004)','Person flagged ambiguous; his objects still attribute via their project',0],
+ ['raw_experiments','All of <code>u_bob</code>’s activity is CI — nightly 02:01–02:12, <code>ci-runner</code>, key <code>ci-service</code>','<code>actor_type = automation</code>; Bob is an <code>automation_identity</code>',0],
+ ['raw_experiments.repo_info','<code>commit_time</code> is <code>2026-07-20 00:00:00</code> on every row, and 5 runs predate their own “commit”','Treated as a placeholder and never used anywhere',1],
+ ['raw_experiments.metadata','CI shows up three ways — <code>ci_run_id</code>, <code>ci: "true"</code> as a string, <code>source: ci-daily</code> — and <code>source</code> is free text','All three recognised; free-text source scored heuristic at 0.60',0],
+ ['objects','12 of 31 carry no origin information; prompts have no metadata column at all','<code>surface = unknown</code>, never guessed as UI',0],
+ ['raw_segment_pages','Two anonymous views (<code>anon_x9</code>)','Excluded from attribution, counted in the scorecard',0],
+ ['raw_account_org_map','<code>org_nomap</code> unmapped; <code>org_initech</code> linked only by <code>org_c_fallback</code>','Prospect / low confidence 0.50 — and that 0.50 is why Initech’s surge is held',1],
+ ['raw_salesforce_accounts','ACC006 and ACC007 share <code>hooli.com</code>; ACC008 has no domain or LinkedIn; ticker stored as <code>NYSE:WAYN</code>','Shared keys cannot decide; gaps surface in <code>crm_identifier_gaps</code>; ticker split into exchange and symbol',0],
+ ['raw_signal_companies','<code>sc11</code> has Acme’s domain with Pied Piper’s LinkedIn; <code>sc07</code> has no identifiers; <code>sc05</code> is named “Hooli Inc” but links to Hooli XYZ','Conflict, review, and LinkedIn-decides respectively',0],
+ ['raw_news_events','<strong>n5 is keyed to Wayne (sc08) but reads “Stark Industries hires new CTO”</strong>','<code>is_entity_mismatch</code>, never actionable',1],
+ ['news × products','The same launch arrives in both feeds (Acme Copilot, Middle-Out API)','Merged into one corroborated signal',0],
+ ['raw_trace_volume','8 days only, perfectly linear (+0.7 GB/day for every org), and no <code>user_id</code>','7-day trend at org level only; growth percentages sit on small bases',0],
+ ['all','The data ends 2026-07-27','Windows use <code>var(\'as_of_date\')</code>, so every run is deterministic',0],
+ ['raw_salesforce_accounts','The brief names “accounts, <strong>owners</strong>, the enterprise book” — the file has no owner, segment or tier column','Ownership and routing are out of scope; the 360 is built so an <code>owner_id</code> is one join away',0]
+];
+document.getElementById('issues').innerHTML = ISSUES.map(function(r){
+  return '<tr><td><code>'+r[0]+'</code></td><td>'+r[1]+'</td><td>'+r[2]
+       + (r[3] ? ' <span class="tag t-warn">warn test</span>' : '') + '</td></tr>';
+}).join('');
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Copy buttons + scroll spy
+   ═══════════════════════════════════════════════════════════════════════ */
+document.querySelectorAll('.copy').forEach(function(b){
+  b.addEventListener('click', function(){
+    var el = document.getElementById(b.dataset.copy);
+    navigator.clipboard.writeText(el.innerText).then(function(){
+      b.textContent = 'Copied'; setTimeout(function(){ b.textContent = 'Copy'; }, 1400);
+    }).catch(function(){ b.textContent = 'Select manually'; });
+  });
+});
+(function(){
+  var links = [].slice.call(document.querySelectorAll('#nav a'));
+  var secs = links.map(function(a){ return document.querySelector(a.getAttribute('href')); });
+  var io = new IntersectionObserver(function(es){
+    es.forEach(function(e){
+      if(!e.isIntersecting) return;
+      var i = secs.indexOf(e.target);
+      links.forEach(function(a,j){ a.classList.toggle('on', i === j); });
+    });
+  }, {rootMargin:'-70px 0px -72% 0px'});
+  secs.forEach(function(s){ if(s) io.observe(s); });
+})();
+</script>
+</body>
+</html>

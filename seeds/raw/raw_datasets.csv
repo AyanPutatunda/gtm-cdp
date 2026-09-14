@@ -1,0 +1,6 @@
+id,project_id,user_id,created,metadata
+d1,p_acme1,u_alice,2026-07-25 14:10:00,"{""source"":""manual""}"
+d2,p_globex1,u_carol,2026-07-23 09:00:00,
+d3,p_acme2,u_bob,2026-07-26 02:15:00,"{""source"":""ci-daily""}"
+d4,p_initech1,u_erin,2026-07-26 15:05:00,
+d5,p_umbrella1,u_frank,2026-07-20 10:05:00,

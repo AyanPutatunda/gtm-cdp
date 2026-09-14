@@ -1,0 +1,81 @@
+# ---------------------------------------------------------------------------
+# NOT LOADED BY dbt. This file sits in docs/ on purpose — it is outside
+# model-paths, so it is documentation, not a parsed artifact, and `dbt build`
+# on the seeds stays green.
+#
+# It is here because the README makes a claim ("swap the seeds for landed
+# tables and CLEANSED / UNIFIED do not change at all") and a claim like that
+# should be checkable. This is the whole diff.
+#
+# To go live:
+#   1. copy this file to models/_sources.yml
+#   2. in the 18 models under models/raw/, change
+#          from {{ ref('raw_users') }}       ->   from {{ source('product', 'users') }}
+#          from {{ ref('raw_salesforce_accounts') }} -> {{ source('crm', 'salesforce_accounts') }}
+#          from {{ ref('raw_signal_companies') }}    -> {{ source('signals', 'companies') }}
+#      ...one line per staging model, nothing else
+#   3. delete seeds/raw/ (keep seeds/reference/ — those are version-controlled
+#      rules, not ingested data)
+#   4. add `dbt source freshness` ahead of `dbt build` in the schedule
+#
+# Nothing in models/cleansed/ or models/unified/ changes. That is the point of
+# never letting business logic read a seed directly.
+# ---------------------------------------------------------------------------
+version: 2
+
+sources:
+  # Product telemetry. Landed by the product's own CDC / Snowpipe.
+  # Hourly, because usage and traces are the fastest-moving inputs.
+  - name: product
+    database: "{{ env_var('SNOWFLAKE_DATABASE', 'GTM_CDP') }}"
+    schema: product_raw
+    loaded_at_field: _loaded_at
+    freshness:
+      warn_after: {count: 3, period: hour}
+      error_after: {count: 12, period: hour}
+    tables:
+      - name: users
+      - name: members
+      - name: organizations
+      - name: projects
+      - name: experiments
+      - name: datasets
+      - name: prompts
+      - name: segment_pages
+      - name: cli_wizard
+      - name: docs_mcp_events
+      - name: api_keys
+      - name: trace_volume
+      # The instrumentation change from MEMO Q4 lands here as a 13th table.
+      # Adding it does not change the shape of anything above it.
+      # - name: api_request_log
+
+  # Salesforce, landed by Fivetran. Slower cadence; a stale CRM is the
+  # quickest way to produce a confident 360 about the wrong account, which
+  # is why freshness gates the run rather than just warning.
+  - name: crm
+    database: "{{ env_var('SNOWFLAKE_DATABASE', 'GTM_CDP') }}"
+    schema: salesforce
+    loaded_at_field: _fivetran_synced
+    freshness:
+      warn_after: {count: 6, period: hour}
+      error_after: {count: 24, period: hour}
+    tables:
+      - name: salesforce_accounts
+        identifier: account
+      - name: account_org_map
+
+  # Third-party company intelligence, pulled daily from the vendor's API.
+  - name: signals
+    database: "{{ env_var('SNOWFLAKE_DATABASE', 'GTM_CDP') }}"
+    schema: vendor_raw
+    loaded_at_field: _ingested_at
+    freshness:
+      warn_after: {count: 36, period: hour}
+      error_after: {count: 72, period: hour}
+    tables:
+      - name: companies
+        identifier: signal_companies
+      - name: news_events
+      - name: products
+      - name: tech_detections

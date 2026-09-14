@@ -1,0 +1,6 @@
+org_id,account_id,mapping_source
+org_acme,ACC001,contract
+org_acme_eu,ACC001,billing_parent
+org_globex,ACC002,contract
+org_initech,ACC003,org_c_fallback
+org_umbrella,ACC004,contract

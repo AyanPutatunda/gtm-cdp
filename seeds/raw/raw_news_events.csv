@@ -1,0 +1,11 @@
+id,company_id,category,summary,found_at,confidence,product_name,source_url
+n1,sc01,acquires,Acme acquires a small analytics startup,2026-07-20 00:00:00,0.98,,https://news.example/1
+n2,sc01,launches,Acme launches Acme Copilot,2026-07-25 00:00:00,0.91,Acme Copilot,https://news.example/2
+n3,sc05,raises_funding,Hooli raises Series D,2026-07-18 00:00:00,0.95,,https://news.example/3
+n4,sc06,partners_with,Hooli partners with a cloud vendor,2026-07-19 00:00:00,0.72,,https://news.example/4
+n5,sc08,hires,Stark Industries hires new CTO,2026-07-21 00:00:00,0.6,,https://news.example/5
+n6,sc10,raises_funding,Prospect AI raises seed round,2026-07-22 00:00:00,0.88,,https://news.example/6
+n7,sc07,recognition,Stark Industries wins innovation award,2026-07-17 00:00:00,0.4,,https://news.example/7
+n8,sc02,expands,Globex expands to EU,2026-07-23 00:00:00,0.83,,https://news.example/8
+n9,sc09,launches,Pied Piper launches new compression API,2026-07-24 00:00:00,0.9,Middle-Out API,https://news.example/9
+n10,sc11,misc,Acme mention (ambiguous record),2026-07-20 00:00:00,0.55,,https://news.example/10

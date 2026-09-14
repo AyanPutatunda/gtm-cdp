@@ -1,0 +1,97 @@
+version: 2
+
+# Unit tests: fixed inputs, fixed expected output, no seed data involved.
+#
+# The two models below are where this project makes its judgement calls, and
+# both have cases the 21 delivered rows simply do not contain — a LinkedIn
+# country sub-domain, a company name too generic to check, a key that matches
+# nothing. assert_match_keys_are_normalised pins the real rows; these pin the
+# BEHAVIOUR, so a refactor that happens to still fit the seeds still fails.
+
+unit_tests:
+
+  # ---------------------------------------------------------------------
+  # Every URL shape the brief names by hand, plus the ones the seeds miss.
+  # Both sides of the join go through the same CTEs, so the account row and
+  # the company row below must come out with byte-identical keys.
+  # ---------------------------------------------------------------------
+  - name: match_keys_normalise_every_url_shape
+    description: >
+      https://www.Acme.com/products?utm=x and a bare Acme.com must meet;
+      LinkedIn must survive scheme, www, a country sub-domain, a trailing
+      slash, a query string and a fragment; a legal suffix must come off the
+      name; and a leading word too short to identify anyone must be marked
+      unusable rather than silently trusted.
+    model: int_match_keys
+    given:
+      - input: ref('stg_crm__salesforce_accounts')
+        rows:
+          # CRM side: the same company, written the way Salesforce writes it
+          - {account_id: "ACC_T1", account_name: "Acme Corporation", domain: "Acme.com", linkedin_company_url: "https://www.linkedin.com/company/acme-corp", ticker: "NYSE:ACME"}
+      - input: ref('stg_signals__companies')
+        rows:
+          # the brief's own example, + a LinkedIn country sub-domain
+          - {company_id: "sc_t1", company_name: "Acme Corporation", company_website: "https://www.Acme.com/products?utm=x", linkedin_url: "http://uk.linkedin.com/company/Acme-Corp/?trk=abc", linkedin_domain: "acme.com"}
+          # no scheme, upper case, trailing dot, LinkedIn fragment
+          - {company_id: "sc_t2", company_name: "Wayne Enterprises Inc.", company_website: "WWW.WAYNE.COM.", linkedin_url: "https://de.linkedin.com/company/wayne-ent#about", linkedin_domain: null}
+          # port number, multi-part TLD, and a name whose leading word is 'the'
+          - {company_id: "sc_t3", company_name: "The Boring Company", company_website: "HTTPS://WWW.EXAMPLE.CO.UK:8443/path", linkedin_url: null, linkedin_domain: null}
+          # nothing to match on at all
+          - {company_id: "sc_t4", company_name: "Nothing Ltd", company_website: null, linkedin_url: null, linkedin_domain: null}
+          # query string, LinkedIn without www or trailing slash, punctuated name
+          - {company_id: "sc_t5", company_name: "Pied-Piper, LLC", company_website: "http://piedpiper.com/?utm_source=news", linkedin_url: "https://linkedin.com/company/pied-piper", linkedin_domain: "piedpiper.com"}
+    expect:
+      rows:
+        - {entity_type: "account", entity_id: "ACC_T1", domain_key: "acme.com",      linkedin_slug: "acme-corp",  name_key: "acme",             name_first_token: "acme",    name_token_is_specific: true}
+        - {entity_type: "company", entity_id: "sc_t1",  domain_key: "acme.com",      linkedin_slug: "acme-corp",  name_key: "acme",             name_first_token: "acme",    name_token_is_specific: true}
+        - {entity_type: "company", entity_id: "sc_t2",  domain_key: "wayne.com",     linkedin_slug: "wayne-ent",  name_key: "wayneenterprises", name_first_token: "wayne",   name_token_is_specific: true}
+        - {entity_type: "company", entity_id: "sc_t3",  domain_key: "example.co.uk", linkedin_slug: null,         name_key: "theboring",        name_first_token: "the",     name_token_is_specific: false}
+        - {entity_type: "company", entity_id: "sc_t4",  domain_key: null,            linkedin_slug: null,         name_key: "nothing",          name_first_token: "nothing", name_token_is_specific: true}
+        - {entity_type: "company", entity_id: "sc_t5",  domain_key: "piedpiper.com", linkedin_slug: "pied-piper", name_key: "piedpiper",        name_first_token: "pied",    name_token_is_specific: true}
+
+  # ---------------------------------------------------------------------
+  # The precedence ladder, one row per outcome. This is the model that
+  # decides whether a rep sees another company's news, so every branch is
+  # pinned rather than inferred from the eleven seed companies.
+  # ---------------------------------------------------------------------
+  - name: resolution_precedence_and_conflict_rules
+    description: >
+      LinkedIn outranks domain; two independent keys agreeing add 0.05; keys
+      that disagree produce a conflict and no account; only shared keys
+      produce ambiguity; keys that match nothing produce a prospect; nothing
+      to match on produces an enrichment task; and a name pointing somewhere
+      else costs 0.20 and holds the match for a steward.
+    model: int_signal_company_resolution
+    given:
+      - input: ref('int_match_keys')
+        rows:
+          - {entity_type: "company", entity_id: "c_resolved",   entity_name: "A Co",      domain_key: "a.com",      second_domain_key: null, linkedin_slug: "a-slug", name_key: "aco",  is_domain_shared: false}
+          - {entity_type: "company", entity_id: "c_conflict",   entity_name: "Mixed Co",  domain_key: "a.com",      second_domain_key: null, linkedin_slug: "b-slug", name_key: "mix",  is_domain_shared: false}
+          - {entity_type: "company", entity_id: "c_ambiguous",  entity_name: "Shared Co", domain_key: "shared.com", second_domain_key: null, linkedin_slug: null,     name_key: "shar", is_domain_shared: false}
+          - {entity_type: "company", entity_id: "c_unmatched",  entity_name: "New Co",    domain_key: "new.com",    second_domain_key: null, linkedin_slug: "new-co", name_key: "newco", is_domain_shared: false}
+          - {entity_type: "company", entity_id: "c_no_keys",    entity_name: "Blank Co",  domain_key: null,         second_domain_key: null, linkedin_slug: null,     name_key: "blank", is_domain_shared: false}
+          - {entity_type: "company", entity_id: "c_name_wrong", entity_name: "Twin Co",   domain_key: null,         second_domain_key: null, linkedin_slug: "c-slug", name_key: "twin", is_domain_shared: false}
+          # an account row must be ignored entirely by this model
+          - {entity_type: "account", entity_id: "ACC_A",        entity_name: "A Co",      domain_key: "a.com",      second_domain_key: null, linkedin_slug: "a-slug", name_key: "aco",  is_domain_shared: false}
+      - input: ref('int_signal_company_match_candidates')
+        rows:
+          # two independent keys, same account -> 0.90 + 0.05
+          - {company_id: "c_resolved",  match_method: "linkedin_slug",  matched_value: "a-slug",     account_id: "ACC_A", precedence: 1, base_confidence: 0.90, can_resolve: true,  is_unique_for_key: true}
+          - {company_id: "c_resolved",  match_method: "website_domain", matched_value: "a.com",      account_id: "ACC_A", precedence: 2, base_confidence: 0.85, can_resolve: true,  is_unique_for_key: true}
+          # keys point at different accounts -> conflict, no account
+          - {company_id: "c_conflict",  match_method: "linkedin_slug",  matched_value: "b-slug",     account_id: "ACC_B", precedence: 1, base_confidence: 0.90, can_resolve: true,  is_unique_for_key: true}
+          - {company_id: "c_conflict",  match_method: "website_domain", matched_value: "a.com",      account_id: "ACC_A", precedence: 2, base_confidence: 0.85, can_resolve: true,  is_unique_for_key: true}
+          # one key, two accounts -> nothing may decide
+          - {company_id: "c_ambiguous", match_method: "website_domain", matched_value: "shared.com", account_id: "ACC_A", precedence: 2, base_confidence: 0.85, can_resolve: true,  is_unique_for_key: false}
+          - {company_id: "c_ambiguous", match_method: "website_domain", matched_value: "shared.com", account_id: "ACC_B", precedence: 2, base_confidence: 0.85, can_resolve: true,  is_unique_for_key: false}
+          # a good key and a name that says somewhere else
+          - {company_id: "c_name_wrong", match_method: "linkedin_slug", matched_value: "c-slug",     account_id: "ACC_C", precedence: 1,  base_confidence: 0.90, can_resolve: true,  is_unique_for_key: true}
+          - {company_id: "c_name_wrong", match_method: "company_name",  matched_value: "twin",       account_id: "ACC_D", precedence: 99, base_confidence: 0.00, can_resolve: false, is_unique_for_key: true}
+    expect:
+      rows:
+        - {company_id: "c_resolved",   resolution_status: "resolved",       account_id: "ACC_A", match_method: "linkedin_slug", match_confidence: 0.95, needs_review: false, is_conflict: false, next_action: "attach_to_account"}
+        - {company_id: "c_conflict",   resolution_status: "conflict",       account_id: null,    match_method: null,            match_confidence: null, needs_review: false, is_conflict: true,  next_action: "steward_review"}
+        - {company_id: "c_ambiguous",  resolution_status: "ambiguous",      account_id: null,    match_method: null,            match_confidence: null, needs_review: false, is_conflict: false, next_action: "steward_review"}
+        - {company_id: "c_unmatched",  resolution_status: "unmatched",      account_id: null,    match_method: null,            match_confidence: null, needs_review: false, is_conflict: false, next_action: "net_new_prospect"}
+        - {company_id: "c_no_keys",    resolution_status: "no_identifiers", account_id: null,    match_method: null,            match_confidence: null, needs_review: false, is_conflict: false, next_action: "enrich_identifiers"}
+        - {company_id: "c_name_wrong", resolution_status: "resolved",       account_id: "ACC_C", match_method: "linkedin_slug", match_confidence: 0.70, needs_review: true,  is_conflict: false, next_action: "confirm_match"}

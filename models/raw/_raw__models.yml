@@ -1,0 +1,275 @@
+version: 2
+
+# RAW layer: 1:1 typed views over the seeds. Tests here guard the CONTRACT
+# with upstream: primary keys, foreign keys, parseable JSON. Warn-level
+# tests flag the data issues found while profiling (see README).
+
+models:
+  # ---------------------------------------------------------------- product
+  - name: stg_product__users
+    description: One row per product login. Typed copy of raw_users.
+    columns:
+      - name: user_id
+        data_tests: [unique, not_null]
+      - name: email
+        data_tests: [not_null]
+
+  - name: stg_product__members
+    description: User <-> org membership (many-to-many).
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [org_id, user_id]
+    columns:
+      - name: user_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_product__users')
+                field: user_id
+      - name: org_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_product__organizations')
+                field: org_id
+
+  - name: stg_product__organizations
+    description: One row per product org (workspace) with its plan.
+    columns:
+      - name: org_id
+        data_tests: [unique, not_null]
+      - name: plan
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['Enterprise', 'Pro', 'Free', 'enterprise', 'pro', 'free']
+
+  - name: stg_product__projects
+    description: One row per project; every project belongs to one org.
+    columns:
+      - name: project_id
+        data_tests: [unique, not_null]
+      - name: org_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_product__organizations')
+                field: org_id
+
+  - name: stg_product__experiments
+    description: >
+      One row per experiment. repo_info and metadata JSON are parsed into
+      columns. repo_commit_time is a known-bad field (constant placeholder).
+    columns:
+      - name: experiment_id
+        data_tests: [unique, not_null]
+      - name: project_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_product__projects')
+                field: project_id
+      - name: user_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_product__users')
+                field: user_id
+      - name: repo_info_json
+        description: Raw JSON text. When present it must parse, i.e. the commit comes back out.
+        data_tests:
+          - expression_is_true:
+              name: repo_info_json_parses
+              arguments:
+                expression: "repo_info_json is null or repo_commit is not null"
+      - name: repo_commit_time
+        description: >
+          DATA ISSUE: every row carries 2026-07-20 00:00:00, even experiments
+          created days earlier. A commit cannot be newer than the run that
+          logged it, so this field is not used anywhere downstream.
+        data_tests:
+          - expression_is_true:
+              name: dq_warn__repo_commit_time_is_placeholder
+              arguments:
+                expression: "repo_commit_time is null or repo_commit_time <= created_at"
+              config:
+                severity: warn
+
+  - name: stg_product__datasets
+    description: One row per dataset.
+    columns:
+      - name: dataset_id
+        data_tests: [unique, not_null]
+      - name: project_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_product__projects')
+                field: project_id
+      - name: user_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_product__users')
+                field: user_id
+
+  - name: stg_product__prompts
+    description: One row per prompt. No metadata, so origin is unknowable.
+    columns:
+      - name: prompt_id
+        data_tests: [unique, not_null]
+      - name: project_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_product__projects')
+                field: project_id
+      - name: user_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_product__users')
+                field: user_id
+
+  - name: stg_product__segment_pages
+    description: Web-app page views. user_id is null for anonymous visitors.
+    columns:
+      - name: viewed_at
+        data_tests: [not_null]
+      - name: user_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_product__users')
+                field: user_id
+
+  - name: stg_product__cli_wizard
+    description: CLI setup-wizard views. Fired in the BROWSER, not by the CLI.
+    columns:
+      - name: user_id
+        data_tests: [not_null]
+
+  - name: stg_product__docs_mcp_events
+    description: Docs clicks on MCP install/copy. Browser events; intent only.
+    columns:
+      - name: action
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['copy_add_mcp_command', 'install_mcp_server']
+              config:
+                severity: warn
+
+  - name: stg_product__api_keys
+    description: One row per API key (hash only). Objects do NOT record which key created them.
+    columns:
+      - name: api_key_id
+        data_tests: [unique, not_null]
+
+  - name: stg_product__trace_volume
+    description: Org x day ingestion in GB. No user_id at this grain.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [org_id, activity_date]
+    columns:
+      - name: ingested_gb
+        data_tests:
+          - between:
+              arguments:
+                min_value: 0
+                max_value: 100000
+
+  # -------------------------------------------------------------------- crm
+  - name: stg_crm__salesforce_accounts
+    description: Salesforce accounts. domain / linkedin_company_url are sometimes null.
+    columns:
+      - name: account_id
+        data_tests: [unique, not_null]
+
+  - name: stg_crm__account_org_map
+    description: Product org -> Salesforce account. Not every org is mapped.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [org_id, account_id]
+    columns:
+      - name: account_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_crm__salesforce_accounts')
+                field: account_id
+      - name: org_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_product__organizations')
+                field: org_id
+      - name: mapping_source
+        description: New sources must be added to ref_org_mapping_sources or they default to 0.30 confidence.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('ref_org_mapping_sources')
+                field: mapping_source
+              config:
+                severity: warn
+
+  # ---------------------------------------------------------------- signals
+  - name: stg_signals__companies
+    description: Third-party company records. No Salesforce id.
+    columns:
+      - name: company_id
+        data_tests: [unique, not_null]
+
+  - name: stg_signals__news_events
+    columns:
+      - name: news_id
+        data_tests: [unique, not_null]
+      - name: company_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_signals__companies')
+                field: company_id
+      - name: vendor_confidence
+        data_tests:
+          - between:
+              arguments:
+                min_value: 0
+                max_value: 1
+
+  - name: stg_signals__products
+    columns:
+      - name: product_id
+        data_tests: [unique, not_null]
+      - name: company_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_signals__companies')
+                field: company_id
+
+  - name: stg_signals__tech_detections
+    columns:
+      - name: detection_id
+        data_tests: [unique, not_null]
+      - name: company_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_signals__companies')
+                field: company_id
+      - name: vendor_score
+        data_tests:
+          - between:
+              arguments:
+                min_value: 0
+                max_value: 1

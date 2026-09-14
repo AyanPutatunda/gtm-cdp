@@ -1,0 +1,23 @@
+id,project_id,user_id,created,repo_info,metadata
+e_a1,p_acme1,u_alice,2026-07-25 14:03:00,"{""commit"":""a1b2c3"",""branch"":""main"",""dirty"":true,""author_name"":""Alice"",""commit_time"":""2026-07-20 00:00:00""}","{""eval_name"":""rag-eval"",""model"":""gpt-4o""}"
+e_a2,p_acme1,u_alice,2026-07-26 09:12:00,,
+e_b1,p_acme2,u_bob,2026-07-15 02:01:00,"{""commit"":""cafe01"",""branch"":""main"",""dirty"":false,""author_name"":""ci-runner"",""commit_time"":""2026-07-20 00:00:00""}","{""ci_run_id"":""gha-1001"",""source"":""ci-daily"",""eval_name"":""regression-suite""}"
+e_b2,p_acme2,u_bob,2026-07-16 02:02:00,"{""commit"":""cafe02"",""branch"":""main"",""dirty"":false,""author_name"":""ci-runner"",""commit_time"":""2026-07-20 00:00:00""}","{""ci_run_id"":""gha-1002"",""source"":""ci-daily"",""eval_name"":""regression-suite""}"
+e_b3,p_acme2,u_bob,2026-07-17 02:03:00,"{""commit"":""cafe03"",""branch"":""main"",""dirty"":false,""author_name"":""ci-runner"",""commit_time"":""2026-07-20 00:00:00""}","{""ci_run_id"":""gha-1003"",""source"":""ci-daily"",""eval_name"":""regression-suite""}"
+e_b4,p_acme2,u_bob,2026-07-18 02:04:00,"{""commit"":""cafe04"",""branch"":""main"",""dirty"":false,""author_name"":""ci-runner"",""commit_time"":""2026-07-20 00:00:00""}","{""ci_run_id"":""gha-1004"",""source"":""ci-daily"",""eval_name"":""regression-suite""}"
+e_b5,p_acme2,u_bob,2026-07-19 02:05:00,"{""commit"":""cafe05"",""branch"":""main"",""dirty"":false,""author_name"":""ci-runner"",""commit_time"":""2026-07-20 00:00:00""}","{""ci_run_id"":""gha-1005"",""source"":""ci-daily"",""eval_name"":""regression-suite""}"
+e_b6,p_acme2,u_bob,2026-07-20 02:06:00,"{""commit"":""cafe06"",""branch"":""main"",""dirty"":false,""author_name"":""ci-runner"",""commit_time"":""2026-07-20 00:00:00""}","{""ci_run_id"":""gha-1006"",""source"":""ci-daily"",""eval_name"":""regression-suite""}"
+e_b7,p_acme2,u_bob,2026-07-21 02:07:00,"{""commit"":""cafe07"",""branch"":""main"",""dirty"":false,""author_name"":""ci-runner"",""commit_time"":""2026-07-20 00:00:00""}","{""ci_run_id"":""gha-1007"",""source"":""ci-daily"",""eval_name"":""regression-suite""}"
+e_b8,p_acme2,u_bob,2026-07-22 02:08:00,"{""commit"":""cafe08"",""branch"":""main"",""dirty"":false,""author_name"":""ci-runner"",""commit_time"":""2026-07-20 00:00:00""}","{""ci_run_id"":""gha-1008"",""source"":""ci-daily"",""eval_name"":""regression-suite""}"
+e_b9,p_acme2,u_bob,2026-07-23 02:09:00,"{""commit"":""cafe09"",""branch"":""main"",""dirty"":false,""author_name"":""ci-runner"",""commit_time"":""2026-07-20 00:00:00""}","{""ci_run_id"":""gha-1009"",""source"":""ci-daily"",""eval_name"":""regression-suite""}"
+e_b10,p_acme2,u_bob,2026-07-24 02:10:00,"{""commit"":""cafe10"",""branch"":""main"",""dirty"":false,""author_name"":""ci-runner"",""commit_time"":""2026-07-20 00:00:00""}","{""ci_run_id"":""gha-1010"",""source"":""ci-daily"",""eval_name"":""regression-suite""}"
+e_b11,p_acme2,u_bob,2026-07-25 02:11:00,"{""commit"":""cafe11"",""branch"":""main"",""dirty"":false,""author_name"":""ci-runner"",""commit_time"":""2026-07-20 00:00:00""}","{""ci_run_id"":""gha-1011"",""source"":""ci-daily"",""eval_name"":""regression-suite""}"
+e_b12,p_acme2,u_bob,2026-07-26 02:12:00,"{""commit"":""cafe12"",""branch"":""main"",""dirty"":false,""author_name"":""ci-runner"",""commit_time"":""2026-07-20 00:00:00""}","{""ci_run_id"":""gha-1012"",""source"":""ci-daily"",""eval_name"":""regression-suite""}"
+e_c1,p_globex1,u_carol,2026-07-24 16:40:00,,"{""eval_name"":""prompt-test"",""source"":""lambda-prod""}"
+e_c2,p_globex1,u_carol,2026-07-22 11:05:00,"{""commit"":""bb2244"",""branch"":""dev"",""dirty"":true,""author_name"":""Carol"",""commit_time"":""2026-07-20 00:00:00""}","{""eval_name"":""prompt-test""}"
+e_d1,p_globex1,u_dave,2026-07-23 13:20:00,"{""commit"":""dd3311"",""branch"":""feature/x"",""dirty"":false,""author_name"":""Dave"",""commit_time"":""2026-07-20 00:00:00""}","{""ci"":""true""}"
+e_e1,p_initech1,u_erin,2026-07-26 15:00:00,,
+e_f1,p_umbrella1,u_frank,2026-07-20 10:00:00,"{""commit"":""ff5566"",""branch"":""main"",""dirty"":true,""author_name"":""Frank"",""commit_time"":""2026-07-20 00:00:00""}","{""eval_name"":""umbrella-eval""}"
+e_g1,p_acme1,u_grace,2026-07-25 10:00:00,,"{""eval_name"":""exp-a""}"
+e_g2,p_acme1,u_grace_dup,2026-07-25 10:30:00,,
+e_h1,p_nomap1,u_heidi,2026-07-24 09:00:00,"{""commit"":""99aa88"",""branch"":""main"",""dirty"":true,""author_name"":""Heidi"",""commit_time"":""2026-07-20 00:00:00""}","{""eval_name"":""sandbox""}"

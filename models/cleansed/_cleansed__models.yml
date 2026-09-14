@@ -1,0 +1,240 @@
+version: 2
+
+# CLEANSED layer: tests here protect the RULES of identity resolution:
+# grains stay unique, nothing is dropped, conflicts never resolve, every
+# resolved link carries a source and a confidence.
+
+models:
+  - name: int_user_identity
+    description: One row per login, pointed at a deduplicated person (exact, case-insensitive email).
+    columns:
+      - name: user_id
+        data_tests: [unique, not_null]
+      - name: person_id
+        data_tests: [not_null]
+      - name: is_duplicate_login
+        description: >
+          DATA ISSUE: u_grace and u_grace_dup share grace@acme.com. Warn so a
+          new duplicate shows up in every run's log.
+        data_tests:
+          - expression_is_true:
+              name: dq_warn__logins_sharing_an_email
+              arguments:
+                expression: "not is_duplicate_login"
+              config:
+                severity: warn
+    data_tests:
+      - row_count_matches:
+          arguments:
+            compare_model: ref('stg_product__users')
+
+  - name: int_org_account_resolution
+    description: One row per product org, mapped or not, with mapping source and confidence.
+    data_tests:
+      - row_count_matches:
+          name: no_org_dropped_in_account_mapping
+          arguments:
+            compare_model: ref('stg_product__organizations')
+      - expression_is_true:
+          arguments:
+            expression: "account_id is null or (mapping_source is not null and mapping_confidence is not null)"
+      - expression_is_true:
+          arguments:
+            expression: "not is_ambiguous or account_id is null"
+    columns:
+      - name: org_id
+        data_tests: [unique, not_null]
+      - name: resolution_status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['resolved', 'resolved_low_confidence', 'ambiguous', 'unmapped', 'broken_link']
+          - expression_is_true:
+              name: dq_warn__org_mapped_by_fallback_only
+              arguments:
+                expression: "resolution_status <> 'resolved_low_confidence'"
+              config:
+                severity: warn
+      - name: mapping_confidence
+        data_tests:
+          - between:
+              arguments: {min_value: 0, max_value: 1}
+
+  - name: int_memberships
+    description: One row per person x org (logins collapsed), with the org's account resolution.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [person_id, org_id]
+
+  - name: int_api_keys
+    description: One row per API key with its person, org and free-text name hints.
+    columns:
+      - name: api_key_id
+        data_tests: [unique, not_null]
+      - name: person_id
+        data_tests: [not_null]
+
+  - name: int_member_account_resolution
+    description: One row per person with their account (only when unambiguous).
+    data_tests:
+      - expression_is_true:
+          arguments:
+            expression: "not is_ambiguous or account_id is null"
+    columns:
+      - name: person_id
+        data_tests: [unique, not_null]
+      - name: resolution_status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['resolved', 'ambiguous_multi_account', 'partially_mapped', 'org_not_mapped', 'no_membership']
+
+  - name: int_product_activity
+    description: Every product activity classified by surface, evidence kind, attribution, confidence and actor.
+    data_tests:
+      - expression_is_true:
+          arguments:
+            expression: "surface is not null"
+      - expression_is_true:
+          arguments:
+            expression: "project_id is null or org_id is not null"
+    columns:
+      - name: activity_id
+        data_tests: [unique, not_null]
+      - name: person_id
+        data_tests: [not_null]
+      - name: surface
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['ui', 'sdk', 'cli', 'mcp', 'unknown']
+      - name: evidence_kind
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['usage', 'intent']
+      - name: actor_type
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['human', 'automation', 'unknown']
+      - name: confidence_score
+        data_tests:
+          - between:
+              arguments: {min_value: 0, max_value: 1}
+
+  - name: int_org_trace_trend
+    description: >
+      One row per org that ingested traces: the 7-day total ending on the as-of
+      date, and growth against the same org 7 days earlier. Org-level only —
+      trace volume carries no user_id.
+    columns:
+      - name: org_id
+        data_tests: [unique, not_null]
+
+  - name: int_account_trace_trend
+    description: >
+      One row per Salesforce account with at least one org sending traces.
+      The single definition of "trace growth": fct_account_surface_adoption,
+      fct_account_signals and account_360 all read it instead of each rolling
+      int_org_trace_trend up and recomputing the ratio themselves.
+    columns:
+      - name: account_id
+        data_tests: [unique, not_null]
+      - name: trace_growth_7d
+        data_tests:
+          - between:
+              arguments: {min_value: -1, max_value: 1000}
+
+  - name: int_match_keys
+    description: >
+      One row per matchable entity (every Salesforce account and every external
+      company). The only place identifiers are normalised, in plain SQL, so both
+      sides of every join are built the same way.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [entity_type, entity_id]
+      - expression_is_true:
+          name: every_entity_keeps_its_identity
+          arguments:
+            expression: "entity_id is not null and entity_name is not null"
+    columns:
+      - name: entity_type
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['account', 'company']
+      - name: name_first_token
+        description: >
+          Leading word of the cleaned name, used by int_external_signals to
+          check a headline names the company it is keyed to. It is built here
+          so the project keeps exactly one name normaliser.
+      - name: name_token_is_specific
+        description: False when the token is under 4 characters, i.e. too generic to test with.
+
+  - name: int_signal_company_match_candidates
+    description: Every candidate external -> account link and the key that produced it.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [company_id, match_method, account_id]
+
+  - name: int_signal_company_resolution
+    description: One row per external company with its resolution outcome. Nothing dropped.
+    data_tests:
+      - row_count_matches:
+          name: no_external_company_dropped_in_resolution
+          arguments:
+            compare_model: ref('stg_signals__companies')
+      # the stated principle: every resolved mapping carries its source and a confidence
+      - expression_is_true:
+          name: every_resolved_mapping_has_source_and_confidence
+          arguments:
+            expression: "resolution_status <> 'resolved' or (account_id is not null and match_method is not null and match_confidence is not null)"
+      # conflicts set a flag, they never guess
+      - expression_is_true:
+          name: conflicts_are_flagged_never_resolved
+          arguments:
+            expression: "not is_conflict or account_id is null"
+      # a name can suggest, never decide
+      - expression_is_true:
+          name: company_name_never_decides_a_match
+          arguments:
+            expression: "match_method is null or match_method <> 'company_name'"
+    columns:
+      - name: company_id
+        data_tests: [unique, not_null]
+      - name: resolution_status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['resolved', 'conflict', 'ambiguous', 'unmatched', 'no_identifiers']
+      - name: match_confidence
+        data_tests:
+          - between:
+              arguments: {min_value: 0, max_value: 1}
+      - name: account_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('stg_crm__salesforce_accounts')
+                field: account_id
+
+  - name: int_external_signals
+    description: News, products and tech in one deduplicated stream, carrying resolution context.
+    columns:
+      - name: signal_id
+        data_tests: [unique, not_null]
+      - name: is_entity_mismatch
+        description: >
+          DATA ISSUE: n5 is keyed to Wayne Enterprises (sc08) but reads
+          "Stark Industries hires new CTO". Warn on every run.
+        data_tests:
+          - expression_is_true:
+              name: dq_warn__headline_names_a_different_company
+              arguments:
+                expression: "not is_entity_mismatch"
+              config:
+                severity: warn

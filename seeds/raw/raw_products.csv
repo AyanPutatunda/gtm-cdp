@@ -1,0 +1,6 @@
+id,company_id,name,category,first_seen_at,source_url
+prod1,sc01,Acme Copilot,ai_assistant,2026-07-25 00:00:00,https://acme.com/copilot
+prod2,sc04,Umbrella Shield,security,2026-06-01 00:00:00,https://umbrella.co/shield
+prod3,sc09,Middle-Out API,developer_tools,2026-07-24 00:00:00,https://piedpiper.com/api
+prod4,sc10,Prospect Predict,ml_platform,2026-07-10 00:00:00,https://prospect-ai.com/predict
+prod5,sc05,Hooli Search,search,2026-05-15 00:00:00,https://hooli.com/search

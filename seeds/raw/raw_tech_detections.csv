@@ -1,0 +1,7 @@
+id,company_id,technology_name,first_seen_at,score
+t1,sc01,Datadog,2026-05-01 00:00:00,0.9
+t2,sc01,Snowflake,2026-05-01 00:00:00,0.8
+t3,sc02,Kubernetes,2026-06-01 00:00:00,0.7
+t4,sc09,React,2026-06-15 00:00:00,0.95
+t5,sc10,PostgreSQL,2026-07-01 00:00:00,0.6
+t6,sc05,Elasticsearch,2026-05-20 00:00:00,0.85

@@ -1,0 +1,7 @@
+org_id,org_name,created_at,plan
+org_acme,Acme Production,2025-11-01 10:00:00,Enterprise
+org_acme_eu,Acme EU,2026-01-15 10:00:00,Enterprise
+org_globex,Globex,2026-02-01 10:00:00,Pro
+org_initech,Initech,2026-03-10 10:00:00,Pro
+org_umbrella,Umbrella Labs,2026-04-01 10:00:00,Pro
+org_nomap,Startup Sandbox,2026-05-01 10:00:00,Free

@@ -1,0 +1,10 @@
+user_id,email,created_at
+u_alice,alice@acme.com,2025-11-01 10:05:00
+u_bob,bob@acme.com,2025-11-02 09:00:00
+u_carol,carol@globex.io,2026-02-01 11:00:00
+u_dave,dave@globex.io,2026-02-03 12:00:00
+u_erin,erin@initech.com,2026-03-10 12:00:00
+u_frank,frank@umbrella.co,2026-04-01 12:00:00
+u_grace,grace@acme.com,2026-01-20 08:00:00
+u_grace_dup,grace@acme.com,2026-06-02 08:00:00
+u_heidi,heidi@startup.dev,2026-05-01 12:00:00

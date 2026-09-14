@@ -1,0 +1,8 @@
+project_id,org_id,name
+p_acme1,org_acme,Acme RAG
+p_acme2,org_acme,Acme Nightly CI
+p_acmeeu,org_acme_eu,Acme EU
+p_globex1,org_globex,Globex Assistant
+p_initech1,org_initech,Initech Bot
+p_umbrella1,org_umbrella,Umbrella Eval
+p_nomap1,org_nomap,Sandbox

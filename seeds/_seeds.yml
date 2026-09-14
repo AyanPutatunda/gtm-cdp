@@ -1,0 +1,50 @@
+version: 2
+
+seeds:
+  # Reference data: the RULES of the platform, kept as data so they can be
+  # read, reviewed and changed without touching SQL.
+  - name: ref_org_mapping_sources
+    description: Confidence and precedence for each way an org gets linked to an account.
+    columns:
+      - name: mapping_source
+        data_tests: [unique, not_null]
+      - name: confidence_score
+        data_tests:
+          - between:
+              arguments: {min_value: 0, max_value: 1}
+
+  - name: ref_external_match_rules
+    description: Precedence and base confidence for external -> account match keys.
+    columns:
+      - name: match_method
+        data_tests: [unique, not_null]
+      - name: precedence
+        data_tests: [unique, not_null]
+
+  - name: ref_surface_signals
+    description: >
+      The surface-attribution catalogue. One row per signal: which surface it
+      points at, whether it proves usage or only intent, how it is attributed,
+      its confidence, and in plain words what it can and cannot prove.
+    columns:
+      - name: signal_code
+        data_tests: [unique, not_null]
+      - name: surface
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['ui', 'sdk', 'cli', 'mcp', 'unknown']
+      - name: evidence_kind
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['usage', 'intent']
+      - name: attribution
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['deterministic', 'heuristic', 'none']
+      - name: confidence_score
+        data_tests:
+          - between:
+              arguments: {min_value: 0, max_value: 1}

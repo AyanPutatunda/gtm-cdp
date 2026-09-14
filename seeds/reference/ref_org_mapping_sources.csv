@@ -1,0 +1,4 @@
+mapping_source,confidence_score,precedence,rationale
+contract,0.95,1,"A signed contract names this org, so the link is contractual fact"
+billing_parent,0.85,2,"Billing rolls this org up to a parent account; right for revenue, may hide a subsidiary"
+org_c_fallback,0.50,3,"Fallback heuristic mapping; treat as unverified until a human or a contract confirms it"

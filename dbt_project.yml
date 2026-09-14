@@ -1,0 +1,84 @@
+name: gtm_cdp
+version: "1.0.0"
+config-version: 2
+profile: gtm_cdp
+require-dbt-version: [">=1.10.0", "<2.0.0"]
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+analysis-paths: ["analyses"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages", "logs"]
+
+# ---------------------------------------------------------------------------
+# Project-wide knobs
+# ---------------------------------------------------------------------------
+vars:
+  # The seeds are a frozen snapshot (latest event = 2026-07-27). Every "last N
+  # days" window is measured from this date so results are deterministic. In
+  # production pass --vars '{as_of_date: today}' to use the current date.
+  as_of_date: "2026-07-27"
+  lookback_days: 30
+  # A news item needs at least this VENDOR confidence before a rep sees it.
+  # It gates the third-party feed's own score and nothing else — product-side
+  # signals carry their confidence from ref_surface_signals.
+  min_vendor_confidence: 0.70
+  # ...and the link that put it on the account needs at least this confidence.
+  min_attribution_confidence: 0.70
+  # 7-day trace growth that counts as a usage surge (0.25 = +25%).
+  usage_surge_threshold: 0.25
+
+# ---------------------------------------------------------------------------
+# Medallion layout
+#   RAW       -> seeds (as delivered) + 1:1 typed staging views   (schema: raw)
+#   CLEANSED  -> normalisation, case matching, dedupe, resolution (schema: cleansed, tables)
+#   UNIFIED   -> business-facing views: members, accounts, 360    (schema: unified, views only)
+# ---------------------------------------------------------------------------
+seeds:
+  gtm_cdp:
+    +schema: raw
+    +quote_columns: false     # Snowflake upper-cases seed columns; keyword_column() relies on it
+    raw:
+      +tags: ["raw", "source_data"]
+      raw_experiments:
+        +column_types:
+          repo_info: varchar
+          metadata: varchar
+      raw_datasets:
+        +column_types:
+          metadata: varchar
+      raw_salesforce_accounts:
+        +column_types:
+          ticker: varchar
+          domain: varchar
+          linkedin_company_url: varchar
+      raw_signal_companies:
+        +column_types:
+          company_website: varchar
+          linkedin_url: varchar
+          linkedin_domain: varchar
+      raw_news_events:
+        +column_types:
+          product_name: varchar
+      raw_segment_pages:
+        +column_types:
+          user_id: varchar
+    reference:
+      +tags: ["reference"]
+
+models:
+  gtm_cdp:
+    raw:
+      +schema: raw
+      +materialized: view
+      +tags: ["raw"]
+    cleansed:
+      +schema: cleansed
+      +materialized: table
+      +tags: ["cleansed"]
+    unified:
+      +schema: unified
+      +materialized: view
+      +tags: ["unified"]

@@ -1,0 +1,11 @@
+account_id,account_name,domain,linkedin_company_url,ticker
+ACC001,Acme Corp,acme.com,https://www.linkedin.com/company/acme-corp,
+ACC002,Globex,,https://www.linkedin.com/company/globex-industries,
+ACC003,Initech,initech.com,,
+ACC004,Umbrella Labs,umbrella.co,https://linkedin.com/company/umbrella-labs,
+ACC005,Soylent Corp,soylent.com,,
+ACC006,Hooli,hooli.com,https://www.linkedin.com/company/hooli,
+ACC007,Hooli XYZ,hooli.com,https://www.linkedin.com/company/hooli-xyz,
+ACC008,Stark Industries,,,
+ACC009,Wayne Enterprises,wayne.com,https://www.linkedin.com/company/wayne-ent,NYSE:WAYN
+ACC010,Pied Piper,piedpiper.com,https://www.linkedin.com/company/pied-piper,

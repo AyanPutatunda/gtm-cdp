@@ -1,0 +1,238 @@
+version: 2
+
+# UNIFIED layer: views only. Tests here protect what a rep or an exec reads:
+# one row per account, honest surface claims, no silent drops.
+
+models:
+  - name: dim_members
+    description: >
+      One row per person (deduplicated human behind one or more logins), with
+      account resolution, member type and a per-surface evidence summary.
+    columns:
+      - name: person_id
+        data_tests: [unique, not_null]
+      - name: account_id
+        description: Null when the person belongs to 2+ accounts or to an unmapped org. Never guessed.
+      - name: member_type
+        description: >
+          human | automation_identity (every attributable usage event is automation) |
+          undetermined (active, but only through objects of unknown origin)
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['human', 'automation_identity', 'undetermined']
+      - name: ui_evidence
+        description: >
+          Pivoted from human_evidence_status: usage_proven | usage_likely |
+          intent_only | origin_unknown | no_evidence. Automation running under
+          this person's key is excluded — see sdk_evidence_any_actor.
+      - name: cli_evidence
+        description: Can be intent_only at best. CLI usage is not observable in this data.
+      - name: sdk_evidence_any_actor
+        description: >
+          The same surface counting automation too. Bob reads no_evidence /
+          usage_proven across these two columns: his key ran 12 nightly CI
+          jobs, he did not.
+      - name: sdk_usage_actor
+        description: human | automation_only | human_and_automation | unknown (null when no usage)
+    data_tests:
+      # Guardrail: an identity whose every attributable event is automation
+      # must never be presented as a person using a surface.
+      - expression_is_true:
+          name: automation_identity_never_shown_as_a_human_user
+          arguments:
+            expression: >
+              member_type <> 'automation_identity'
+              or coalesce(ui_evidence, 'no_evidence') in ('no_evidence', 'intent_only')
+              and coalesce(sdk_evidence, 'no_evidence') in ('no_evidence', 'intent_only')
+
+  - name: fct_member_surface_activity
+    description: >
+      Per-member activity by surface. One row per person x surface
+      (ui, sdk, cli, mcp, unknown) - zeros are explicit, not missing.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [person_id, surface]
+      # Guardrail: CLI and MCP have no usage telemetry today. If this ever fails,
+      # someone added a rule that over-claims. Remove only when real CLI/MCP
+      # telemetry lands (see MEMO Q4).
+      - expression_is_true:
+          name: cli_and_mcp_never_claimed_as_usage
+          arguments:
+            expression: "surface not in ('cli', 'mcp') or evidence_status in ('intent_only', 'no_evidence')"
+      # human evidence is a subset of all evidence: it can never be the stronger claim
+      - expression_is_true:
+          name: human_evidence_never_exceeds_total_evidence
+          arguments:
+            expression: >
+              human_evidence_status = evidence_status
+              or (human_evidence_status = 'no_evidence')
+              or (human_evidence_status = 'intent_only' and evidence_status <> 'no_evidence')
+    columns:
+      - name: evidence_status
+        description: Did this SURFACE get used under this person's identity, by anyone or anything?
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['usage_proven', 'usage_likely', 'intent_only', 'origin_unknown', 'no_evidence']
+      - name: human_evidence_status
+        description: >
+          Did this PERSON use it? Same ladder, automation excluded. dim_members
+          pivots this one because dim_members is a view of people.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['usage_proven', 'usage_likely', 'intent_only', 'origin_unknown', 'no_evidence']
+      - name: usage_actor
+        description: human | automation_only | human_and_automation | unknown (null when no usage)
+
+  - name: fct_account_surface_adoption
+    description: >
+      Account x surface rollup. known_members is the count of product members
+      mapped to the account, NOT the account's headcount. pct_members_usage_proven
+      is null for CLI and MCP on purpose.
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [account_id, surface]
+      - expression_is_true:
+          name: no_usage_percentage_for_unmeasurable_surfaces
+          arguments:
+            expression: "usage_is_measurable or pct_members_usage_proven is null"
+      - expression_is_true:
+          arguments:
+            expression: "members_usage_proven + members_usage_likely + members_intent_only <= known_members"
+      # if the only proof is org-level, no member may be reported as a proven user
+      - expression_is_true:
+          name: org_level_proof_never_reported_as_member_usage
+          arguments:
+            expression: "evidence_level <> 'org' or coalesce(pct_members_usage_proven, 0) = 0"
+      - expression_is_true:
+          name: every_evidence_status_has_evidence_behind_it
+          arguments:
+            expression: >
+              evidence_level <> 'none'
+              or account_evidence_status in ('no_evidence', 'not_measurable')
+    columns:
+      - name: account_evidence_status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['usage_proven', 'usage_likely', 'intent_only', 'not_measurable', 'no_evidence']
+      - name: evidence_level
+        description: >
+          The GRAIN the evidence sits at: member (a named person's own
+          activity), org (trace ingestion or CI only — no member is a proven
+          user) or none. Stops a dashboard rendering "usage_proven" beside
+          "0% of members" with no explanation.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['member', 'org', 'none']
+      - name: honest_summary
+        description: A sentence you can paste into a deck without over-claiming.
+
+  - name: dim_signal_companies
+    description: Every external company, resolved or not, with evidence and next action.
+    data_tests:
+      - row_count_matches:
+          arguments:
+            compare_model: ref('stg_signals__companies')
+    columns:
+      - name: company_id
+        data_tests: [unique, not_null]
+      - name: next_action
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['attach_to_account', 'confirm_match', 'steward_review', 'net_new_prospect', 'enrich_identifiers']
+
+  - name: fct_account_signals
+    description: >
+      The account signal feed - product and external signals in one shape.
+      The extension point: new sources are one more union branch.
+    columns:
+      - name: signal_id
+        data_tests: [unique, not_null]
+      - name: account_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('stg_crm__salesforce_accounts')
+                field: account_id
+      - name: signal_source
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['external', 'product']
+      - name: signal_confidence
+        data_tests:
+          - between:
+              arguments: {min_value: 0, max_value: 1}
+    data_tests:
+      # anything flagged for review must never be pushed to a rep
+      - expression_is_true:
+          name: flagged_signals_never_reach_reps
+          arguments:
+            expression: "not (needs_review and is_actionable)"
+
+  - name: account_360
+    description: >
+      One row per Salesforce account: who they are, how they use the product
+      (with honest evidence levels), what is happening to them, and plain
+      English action reasons with a v0 priority rank.
+    data_tests:
+      - row_count_matches:
+          name: account_360_has_every_salesforce_account
+          arguments:
+            compare_model: ref('stg_crm__salesforce_accounts')
+    columns:
+      - name: account_id
+        data_tests: [unique, not_null]
+      - name: priority_rank
+        data_tests: [unique, not_null]
+      - name: known_members
+        description: Product members mapped to this account (not company headcount).
+      - name: cli_adoption
+        description: intent_only at best; not_measurable when there is no intent either.
+      - name: action_reasons
+        description: >
+          Actionable headlines from fct_account_signals, separated by ' | ',
+          ordered strongest-and-freshest first so a rep reading left to right
+          gets the best reason to call, not the alphabetically first one.
+      - name: sdk_evidence_level
+        description: >
+          member when a named person's own activity proves SDK use; org when
+          the only proof is trace ingestion or CI.
+      - name: external_records_pending_review
+        description: An external record whose keys point here but could not be resolved safely.
+      - name: external_records_awaiting_confirmation
+        description: >
+          An external record that DID resolve here (or to this account's twin)
+          but whose company name contradicts the deciding key, so its signals
+          are held until a steward confirms.
+
+  - name: net_new_prospects
+    description: >
+      Companies we see (external feed) or who use us (product sign-ups) with no
+      Salesforce account. An output of the CDP, not an error.
+    columns:
+      - name: prospect_id
+        data_tests: [unique, not_null]
+      - name: prospect_source
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['external_signal', 'product_signup']
+
+  - name: rpt_resolution_quality
+    description: Resolution scorecard (MEMO Q2). One row per metric, recomputed each run.
+    columns:
+      - name: metric_order
+        data_tests: [unique, not_null]
+      - name: rate
+        data_tests:
+          - between:
+              arguments: {min_value: 0, max_value: 1}
