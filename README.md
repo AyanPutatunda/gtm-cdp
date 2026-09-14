@@ -33,32 +33,43 @@ The brief set the constraint that shaped every design decision here: favour an u
 
 ## Running it
 
-Three ways in, all producing the same thing. Pick whichever you already have installed.
+### Step 0 — get into the project
 
-| | You need | Best for |
-|---|---|---|
-| **A · Docker** | Docker only | Nothing to install, guaranteed-clean environment |
-| **B · venv** | Python 3.9–3.13 | Iterating on the models, `dbt show`, `dbt docs serve` |
-| **C · Snowflake** | credentials | Running the same code against a real warehouse |
+```bash
+unzip gtm_cdp.zip && cd gtm_cdp      # or: git clone <repo> && cd gtm_cdp
+ls                                    # you should see dbt_project.yml, seeds/, models/, Dockerfile
+```
 
-Whichever you use, the expected output is:
+Everything below is run from that directory. Nothing is downloaded at run time except Python packages (path B) or the base image (path A), and there are no credentials to set up — the default target is a local DuckDB file.
+
+Then pick one of three paths. All three produce the same result.
+
+| | You need | Takes | Best for |
+|---|---|---|---|
+| **A · Docker** | Docker, nothing else | ~90s first build, ~10s after | Nothing to install, guaranteed-clean environment |
+| **B · venv** | Python **3.10 or newer** | ~60s first install, ~5s after | Iterating on models, `dbt show`, `dbt docs serve` |
+| **C · Snowflake** | credentials | — | Running the same code against a real warehouse |
+
+Whichever you use, the last line should read:
 
 ```
 Done. PASS=223 WARN=4 ERROR=0 SKIP=0 NO-OP=0 REUSED=0 TOTAL=227
 ```
 
-The four warnings are meant to be there. They are data-quality alerts for problems in the seeds (listed under *Data issues found*). I made them warn rather than fail so the pipeline still completes, but the problem shows up in every run instead of being forgotten.
+**The four warnings are meant to be there.** They are data-quality alerts for real problems in the seeds (listed under *Data issues found*): two logins sharing an email, a placeholder `commit_time`, an org mapped only by a fallback rule, and a headline keyed to the wrong company. I made them warn rather than fail so the pipeline still completes, but the problem shows up in every run instead of being forgotten. **`ERROR=0` is the thing to check.**
 
 ---
 
 ### A · Docker
 
-No Python, no dbt, no warehouse. The image pins Python 3.12 because dbt does not support 3.14 yet.
+No Python, no dbt, no warehouse. Two commands, from the project directory:
 
 ```bash
-docker build -t gtm-cdp .
-docker run --rm -v "$PWD:/app" gtm-cdp
+docker build -t gtm-cdp .                    # ~90 seconds, mostly pip
+docker run --rm -v "$PWD:/app" gtm-cdp       # prints the PASS line above
 ```
+
+The image pins `python:3.12-slim` for reproducibility, not because newer is broken — see the note under path B.
 
 That is the whole thing. The bind mount is what puts `gtm_cdp.duckdb`, `target/` and `logs/` back on your machine; drop it and you get a throwaway container that just proves the build is green.
 
@@ -80,39 +91,48 @@ Two notes. On Linux, files written through the bind mount are owned by root — 
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-export DBT_PROFILES_DIR=.        # profiles.yml ships with the project
+export DBT_PROFILES_DIR=.        # profiles.yml ships with the project root
 dbt build                        # seeds -> models -> tests, in dependency order
 ```
 
-One trap worth naming: **dbt does not support Python 3.14 yet**, and Homebrew's `python3` is already on it. If `pip install` fails, point the venv at 3.12 or 3.13 explicitly — `python3.12 -m venv .venv`, or `uv venv --python 3.12 .venv` if you have `uv`. The Dockerfile pins 3.12 for the same reason.
+**Python version.** The dependencies declare `requires-python >= 3.10`, so 3.9 and earlier will not install. Everything from 3.10 up works, including 3.14 — I verified the full green build on 3.14.2 as well as 3.12. If your `python3` is older than 3.10, point the venv at a newer one explicitly: `python3.12 -m venv .venv`, or `uv venv --python 3.12 .venv` if you have `uv`.
 
 `requirements.txt` pulls `dbt-core`, `dbt-duckdb`, plus `duckdb` and `markdown` for the two doc generators. The default target is a **local DuckDB file** written to `gtm_cdp.duckdb` in the project root, so there is no warehouse to set up and no credentials to supply.
 
-There is a `Makefile` if you prefer:
+Or use the `Makefile`, which picks a suitable interpreter, sets `DBT_PROFILES_DIR` for you, and needs no activation:
 
 ```bash
-make setup      # create .venv and install requirements.txt
-make build      # dbt build
-make test       # dbt test
+make setup      # create .venv and install requirements.txt (fails loudly if no Python 3.10+)
+make build      # dbt build            -> PASS=223 WARN=4 ERROR=0
+make test       # dbt test             -> PASS=164 WARN=4 ERROR=0
 make docs       # rebuild, then regenerate docs/overview.html from the manifest + warehouse
+make memo       # render MEMO.md -> MEMO.pdf (needs Chrome installed)
 make docker     # build the image and run dbt inside it
-make clean      # remove target/, logs/ and the .duckdb file
+make clean      # remove target/, logs/ and the .duckdb file (keeps .venv)
 make help       # list all targets
 ```
 
 ### Looking at the results
 
+These need dbt on your `PATH`, so **activate the venv first** — `make` targets run it out of `.venv/` for you, but your shell does not:
+
 ```bash
+source .venv/bin/activate && export DBT_PROFILES_DIR=.
+
 dbt show -s account_360 --limit 10
 dbt show --inline "select account_name, priority_rank, action_reasons from {{ ref('account_360') }} order by priority_rank"
 dbt docs generate && dbt docs serve      # dbt's own lineage graph + column docs
-open docs/overview.html                  # the project report, with the DAG and every result
 ```
 
-Or open `gtm_cdp.duckdb` in any DuckDB client — the schemas are `raw`, `cleansed` and `unified`:
+The project report needs no tooling at all — it is a single self-contained file:
 
 ```bash
-pip install duckdb
+open docs/overview.html                  # macOS;  xdg-open on Linux,  start on Windows
+```
+
+Or query `gtm_cdp.duckdb` directly. The schemas are `raw`, `cleansed` and `unified`; `duckdb` is already in `requirements.txt`:
+
+```bash
 python -c "import duckdb; duckdb.connect('gtm_cdp.duckdb').sql('select account_name, priority_rank, action_reasons from unified.account_360 order by priority_rank').show(max_width=200)"
 ```
 
@@ -120,6 +140,16 @@ python -c "import duckdb; duckdb.connect('gtm_cdp.duckdb').sql('select account_n
 # or the DuckDB CLI, if you have it
 duckdb gtm_cdp.duckdb -c "select * from unified.rpt_resolution_quality order by metric_order"
 ```
+
+### Confirming it reproduced
+
+Beyond `ERROR=0`, three numbers are worth eyeballing — they are the ones the report and the memo argue from:
+
+| Check | Command | Expected |
+|---|---|---|
+| Build | `dbt build` | `PASS=223 WARN=4 ERROR=0 ... TOTAL=227` |
+| Node counts | in the run summary | `21 seeds, 12 table models, 166 data tests, 2 unit tests, 26 view models` |
+| External resolution | `duckdb gtm_cdp.duckdb -c "select resolution_status, count(*) from cleansed.int_signal_company_resolution group by 1"` | 8 `resolved`, 1 `conflict`, 1 `unmatched`, 1 `no_identifiers` |
 
 ### C · On Snowflake
 
@@ -142,11 +172,15 @@ Dev targets get a schema prefix on purpose (see `macros/generate_schema_name.sql
 `docs/overview.html` is the project write-up: problem, data, exploratory analysis, model-by-model results, and the memo. Its DAG comes from dbt's manifest and every number in it is read back out of the built warehouse, so after any change:
 
 ```bash
-dbt build
+source .venv/bin/activate && export DBT_PROFILES_DIR=.
+
+dbt build                          # must run first: the two generators read its output
 python docs/build_lineage.py       # nodes, layers, passes and edges from target/manifest.json
 python docs/build_report_data.py   # every figure, from gtm_cdp.duckdb
 python docs/build_memo_pdf.py      # MEMO.md -> MEMO.pdf (needs Chrome installed)
 ```
+
+`make docs` runs the first three in order. Both generators fail loudly rather than silently writing a stale page: `build_lineage.py` errors if a model has no description, and refuses to run without `target/manifest.json`.
 
 ---
 

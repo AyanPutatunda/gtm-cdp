@@ -11,8 +11,9 @@
 # ─────────────────────────────────────────────────────────────────────────────
 FROM python:3.12-slim
 
-# dbt does not support 3.14 yet, which is why this pins 3.12 rather than
-# tracking latest. Nothing else here is version-sensitive.
+# Pinned for reproducibility, not because newer is broken: the dependencies
+# declare requires-python >= 3.10 and the build is green on 3.14 too. 3.12 is
+# simply the version this was developed and verified against.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
